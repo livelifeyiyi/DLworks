@@ -4,7 +4,7 @@ import numpy as np
 # from sklearn.utils import shuffle
 from tensorflow.contrib.layers import flatten
 
-mnist_folder = 'E:/data/mnist/'
+mnist_folder = "../MNIST_data/"  # 'E:/data/mnist/'
 mnist = input_data.read_data_sets(mnist_folder, reshape=False)
 X_train, y_train = mnist.train.images, mnist.train.labels
 X_validation, y_validation = mnist.validation.images, mnist.validation.labels
