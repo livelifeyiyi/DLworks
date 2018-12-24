@@ -77,6 +77,10 @@ def variables_lenet5(patch_size=LENET5_PATCH_SIZE, patch_depth1=LENET5_PATCH_DEP
 
 
 def model_lenet5(data, variables):
+	# conv2d(input: a 4-D tensor, filter/kernel: a 4-D tensor [filter_height, filter_width, in_channels, out_channels],
+	# strides: A list of ints. 1-D tensor of length 4. 第一个维度代表着图像的批量数，这个维度肯定每次只能移动一张图片。
+	# 最后一个维度为图片深度（即色彩通道数，1 代表灰度图片，而 3 代表 RGB 图片）
+	# padding: "SAME"/"VALID". 是否需要使用 0 来填补图像周边(SAME是需要)，以确保图像输出尺寸在步幅参数设定为 1 的情况下保持不变)
 	layer1_conv = tf.nn.conv2d(data, variables['w1'], [1, 1, 1, 1], padding='VALID')
 	layer1_actv = tf.sigmoid(layer1_conv + variables['b1'])
 	layer1_pool = tf.nn.avg_pool(layer1_actv, [1, 2, 2, 1], [1, 2, 2, 1], padding='VALID')

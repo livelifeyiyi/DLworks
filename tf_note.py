@@ -4,6 +4,8 @@ import numpy as np
 
 
 def use_graph():
+	a = tf.constant(2, tf.int16)
+	b = tf.constant(4, tf.float32)
 	graph = tf.Graph()
 	with graph.as_default():
 		a = tf.Variable(8, tf.float32)
