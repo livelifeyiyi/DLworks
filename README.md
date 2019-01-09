@@ -1,2 +1,2 @@
-# TFgirl
-My TensorFlow demos
+# DLworks
+My TensorFlow & PyTorch demos
