@@ -27,15 +27,8 @@ id2tag = pd.Series.from_csv(ROOT_DIR + "tag_dict.txt", sep=' ', index_col=None, 
 tag_ids = id2tag.index
 tag_words = id2tag.values
 tag2id = pd.Series(tag_ids, index=tag_words)
-train_x = []  # sentences with words'id
-'''with codecs.open(ROOT_DIR + 'sentence_train.txt', 'r', encoding='utf-8') as train_xfile:
-	train_all = train_xfile.readlines()
-	for line in train_all:
-		line = ast.literal_eval(line)
-		line_x = []
-		for word in line:
-			line_x.append(word2id[word])
-		train_x.append(line_x)'''
+
+print("Processing training sequences......")
 train_y = []
 with codecs.open(ROOT_DIR + 'seq_train.txt', 'r', encoding='utf-8') as train_yfile:
 	seq_all = train_yfile.readlines()
@@ -46,6 +39,16 @@ with codecs.open(ROOT_DIR + 'seq_train.txt', 'r', encoding='utf-8') as train_yfi
 			line_y.append(tag2id[word])
 		train_y.append(line_y)
 
+print("Processing training sentences......")
+train_x = []  # sentences with words'id
+with codecs.open(ROOT_DIR + 'sentence_train.txt', 'r', encoding='utf-8') as train_xfile:
+	train_all = train_xfile.readlines()
+	for line in train_all:
+		line = ast.literal_eval(line)
+		line_x = []
+		for word in line:
+			line_x.append(word2id[word])
+		train_x.append(line_x)
 
 with open(ROOT_DIR + 'RE_data_train.pkl', 'wb') as outp:
 	pickle.dump(word2id, outp)
