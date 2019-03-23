@@ -1,0 +1,100 @@
+Hi.	嗨。
+Hi.	你好。
+Run.	你用跑的。
+Wait!	等等！
+Hello!	你好。
+I try.	让我来。
+I won!	我赢了。
+Oh no!	不会吧。
+Cheers!	乾杯!
+He ran.	他跑了。
+Hop in.	跳进来。
+I lost.	我迷失了。
+I quit.	我退出。
+I'm OK.	我沒事。
+Listen.	听着。
+No way!	不可能！
+No way!	没门！
+Really?	你确定？
+Try it.	试试吧。
+We try.	我们来试试。
+Why me?	为什么是我？
+Ask Tom.	去问汤姆。
+Be calm.	冷静点。
+Be fair.	公平点。
+Be kind.	友善点。
+Be nice.	和气点。
+Call me.	联系我。
+Call us.	联系我们。
+Come in.	进来。
+Get Tom.	找到汤姆。
+Get out!	滾出去！
+Go away!	走開！
+Go away!	滾！
+Go away.	走開！
+Goodbye!	再见！
+Goodbye!	告辞！
+Hang on!	等一下！
+He came.	他来了。
+He runs.	他跑。
+Help me.	帮我一下。
+Hold on.	坚持。
+Hug Tom.	抱抱汤姆！
+I agree.	我同意。
+I'm ill.	我生病了。
+I'm old.	我老了。
+It's OK.	没关系。
+It's me.	是我。
+Join us.	来加入我们吧。
+Keep it.	留着吧。
+Kiss me.	吻我。
+Perfect!	完美！
+See you.	再见！
+Shut up!	閉嘴！
+Skip it.	不管它。
+Take it.	拿走吧。
+Wake up!	醒醒！
+Wash up.	去清洗一下。
+We know.	我们知道。
+Welcome.	欢迎。
+Who won?	谁赢了？
+Why not?	为什么不？
+You run.	你跑。
+Back off.	往后退点。
+Be still.	静静的，别动。
+Cuff him.	把他铐上。
+Drive on.	往前开。
+Get away!	走開！
+Get away!	滾！
+Get down!	趴下！
+Get lost!	滾！
+Get real.	醒醒吧。
+Grab Tom.	抓住汤姆。
+Grab him.	抓住他。
+Have fun.	玩得開心。
+He tries.	他来试试。
+Humor me.	你就随了我的意吧。
+Hurry up.	趕快!
+Hurry up.	快点！
+I forgot.	我忘了。
+I resign.	我放弃。
+I'll pay.	我來付錢。
+I'm busy.	我很忙。
+I'm cold.	我冷。
+I'm fine.	我很好。
+I'm full.	我吃飽了。
+I'm sick.	我生病了。
+I'm sick.	我病了。
+Leave me.	让我一个人呆会儿。
+Let's go!	走吧。
+Let's go!	我們開始吧！
+Let's go!	我們走吧!
+Look out!	当心！
+She runs.	她跑。
+Stand up.	起立。
+They won.	他们赢了。
+Tom died.	汤姆去世了。
+Tom quit.	汤姆不干了。
+Tom swam.	汤姆游泳了。
+Trust me.	相信我。
+Try hard.	努力。
