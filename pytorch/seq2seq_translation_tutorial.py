@@ -94,7 +94,9 @@ import torch
 import torch.nn as nn
 from torch import optim
 import torch.nn.functional as F
+import os
 
+os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ######################################################################
@@ -187,6 +189,7 @@ def unicodeToAscii(s):
 		if unicodedata.category(c) != 'Mn'
 	)
 
+
 # Lowercase, trim, and remove non-letter characters
 
 
@@ -208,7 +211,7 @@ def readLangs(lang1, lang2, reverse=False):
 	print("Reading lines...")
 
 	# Read the file and split into lines
-	lines = open('data/%s-%s.txt' % (lang1, lang2), encoding='utf-8').\
+	lines = open('data/%s-%s.txt' % (lang1, lang2), encoding='utf-8'). \
 		read().strip().split('\n')
 
 	# Split every line into pairs and normalize
@@ -249,8 +252,8 @@ eng_prefixes = (
 
 def filterPair(p):
 	return len(p[0].split(' ')) < MAX_LENGTH and \
-		len(p[1].split(' ')) < MAX_LENGTH and \
-		p[1].startswith(eng_prefixes)
+		   len(p[1].split(' ')) < MAX_LENGTH and \
+		   p[1].startswith(eng_prefixes)
 
 
 def filterPairs(pairs):
@@ -349,7 +352,8 @@ class EncoderRNN(nn.Module):
 		return output, hidden
 
 	def initHidden(self):
-		return torch.zeros(1, 1, self.hidden_size, device=device)
+		return torch.zeros(1, 1, self.hidden_size, device=device)  # if use_cuda, .cuda
+
 
 ######################################################################
 # The Decoder
@@ -398,6 +402,7 @@ class DecoderRNN(nn.Module):
 
 	def initHidden(self):
 		return torch.zeros(1, 1, self.hidden_size, device=device)
+
 
 ######################################################################
 # I encourage you to train and observe the results of this model, but to
@@ -453,7 +458,7 @@ class AttnDecoderRNN(nn.Module):
 		self.out = nn.Linear(self.hidden_size, self.output_size)
 
 	def forward(self, input, hidden, encoder_outputs):
-		embedded = self.embedding(input).view(1, 1, -1)
+		embedded = self.embedding(input).view(1, 1, -1)  # batch, 1, hidden
 		embedded = self.dropout(embedded)
 
 		attn_weights = F.softmax(
@@ -538,7 +543,8 @@ def tensorsFromPair(pair):
 teacher_forcing_ratio = 0.5
 
 
-def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, max_length=MAX_LENGTH):
+def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion,
+		  max_length=MAX_LENGTH):
 	encoder_hidden = encoder.initHidden()
 
 	encoder_optimizer.zero_grad()
@@ -547,6 +553,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	input_length = input_tensor.size(0)
 	target_length = target_tensor.size(0)
 
+	# encoder outputs
 	encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
 
 	loss = 0
@@ -587,7 +594,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	encoder_optimizer.step()
 	decoder_optimizer.step()
 
-	return loss.item() / target_length
+	return loss.item() / target_length  # encoder_outputs
 
 
 ######################################################################
@@ -768,17 +775,15 @@ def evaluateRandomly(encoder, decoder, n=10):
 hidden_size = 256
 encoder1 = EncoderRNN(input_lang.n_words, hidden_size).to(device)
 attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
-
+if torch.cuda.is_available():
+	encoder1 = encoder1.cuda()
+	attn_decoder1 = attn_decoder1.cuda()
 trainIters(encoder1, attn_decoder1, 75000, print_every=5000)
 
 ######################################################################
 #
 
 evaluateRandomly(encoder1, attn_decoder1)
-
-
-
-
 
 
 ######################################################################
@@ -865,4 +870,3 @@ def evaluateAndShowAttention(input_sentence):
 #    -  Save only the Encoder network
 #    -  Train a new Decoder for translation from there
 #
-
