@@ -1,83 +1,156 @@
 # coding=utf-8
-import codecs
-import sys
-import re
-import pandas as pd
-import numpy as np
 import pickle
-import ast
-from collections import deque
+import random
+import unicodedata
+import re
+import json
+import codecs
 
-ROOT_DIR = "E:/code/RE/NYT_processed/"
-# ROOT_DIR = "NYT/"
+SOS_token = 0
+EOS_token = 1
 
-with codecs.open(ROOT_DIR + 'word_dict.txt', 'r', encoding='utf-8') as word_file:
-	all_words = word_file.read().splitlines()
-	print(len(all_words))
+ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
 
-all_words = pd.Series(all_words)
-# all_words = pd.read_csv(ROOT_DIR + "word_dict.txt", sep='\s+', index_col=None, encoding="utf-8")  # Series.from_csv
-# pd.read_table(ROOT_DIR+"word_dict.txt")
-set_ids = all_words.index  # .values
-set_words = all_words.values
-word2id = pd.Series(set_ids, index=set_words)
-id2word = pd.Series(set_words, index=set_ids)
 
-id2tag = pd.Series.from_csv(ROOT_DIR + "tag_dict.txt", sep=' ', index_col=None, encoding="utf-8")
-tag_ids = id2tag.index
-tag_words = id2tag.values
-tag2id = pd.Series(tag_ids, index=tag_words)
+class Lang:
+	def __init__(self, name):
+		self.name = name
+		self.word2index = {}
+		self.word2count = {}
+		self.index2word = {0: "SOS", 1: "EOS"}
+		self.n_words = 2  # Count SOS and EOS
 
-print("Processing training sequences......")
-train_y = []
-with codecs.open(ROOT_DIR + 'seq_train.txt', 'r', encoding='utf-8') as train_yfile:
-	seq_all = train_yfile.readlines()
-	for line in seq_all:
-		line = ast.literal_eval(line)
-		line_y = []
-		for word in line:
-			line_y.append(tag2id[word])
-		train_y.append(line_y)
+	def addSentence(self, sentence):
+		for word in sentence.split(' '):
+			self.addWord(word)
 
-print("Processing training sentences......")
-train_x = []  # sentences with words'id
-with codecs.open(ROOT_DIR + 'sentence_train.txt', 'r', encoding='utf-8') as train_xfile:
-	train_all = train_xfile.readlines()
-	for line in train_all:
-		line = ast.literal_eval(line)
-		line_x = []
-		for word in line:
-			line_x.append(word2id[word])
-		train_x.append(line_x)
+	def addWord(self, word):
+		if word not in self.word2index:
+			self.word2index[word] = self.n_words
+			self.word2count[word] = 1
+			self.index2word[self.n_words] = word
+			self.n_words += 1
+		else:
+			self.word2count[word] += 1
+'''
+sentence_len =[]
+with codecs.open(ROOT_DIR+"train.json", "r", encoding="utf-8") as f:
+	for line in f.readlines():
+		sentence_json = json.loads(line)
+		sentence = sentence_json["sentext"]
+		sentence_len.append(len(sentence.split()))
+print(sentence_len)
+print(max(sentence_len))
+'''
 
-with open(ROOT_DIR + 'RE_data_train.pkl', 'wb') as outp:
-	pickle.dump(word2id, outp)
-	pickle.dump(id2word, outp)
-	pickle.dump(tag2id, outp)
-	pickle.dump(train_x, outp)
-	pickle.dump(train_y, outp)
-# pickle.dump(pos_e1, outp)
-# pickle.dump(pos_e2, outp)
-print('** Finished saving train data.')
+def data2pkl():
+	print("Processing training data......")
+	input = Lang("sentence")
+	tag2id = {}
 
-test_x = []
-with codecs.open(ROOT_DIR + 'sentence_test.txt', 'r', encoding='utf-8') as test_xfile:
-	test_all = test_xfile.readlines()
-	for line in test_all:
-		line_x = []
-		for word in line:
-			line_x.append(word2id[word])
-		test_x.append(line_x)
-test_y = []
-with codecs.open(ROOT_DIR + 'seq_test.txt', 'r', encoding='utf-8') as test_yfile:
-	test_yall = test_yfile.readlines()
-	for line in test_yall:
-		line_y = []
-		for word in line:
-			line_y.append(word2id[word])
-		test_y.append(line_y)
+	train_y = []
+	with codecs.open(ROOT_DIR+"train.json", "r", encoding="utf-8") as f:
+		for line in f.readlines():
+			sentence_json = json.loads(line)
+			sentence = sentence_json["sentext"]
+			tag = sentence_json["relations"][0]["tags"]
+			input.addSentence(sentence)
+			train_y.append(tag)
+			for t in tag:
+				if tag2id == {}:
+					tag2id[t] = 0
+				if t in tag2id.keys():
+					pass
+				else:
+					tag2id[t] = len(tag2id)
+	print(tag2id)
 
-with open(ROOT_DIR + 'RE_data_test.pkl', 'wb') as outp:
-	pickle.dump(test_x, outp)
-	pickle.dump(test_y, outp)
-print('** Finished saving test data.')
+	train_x = []
+	with codecs.open(ROOT_DIR+"train.json", "r", encoding="utf-8") as f:
+		for line in f.readlines():
+			sentence_json = json.loads(line)
+			sentence = sentence_json["sentext"]
+			indexes = [input.word2index[word] for word in sentence.split(' ')]
+			indexes.append(EOS_token)
+			train_x.append(indexes)
+	# word2id = input.word2index
+	id2word = input.index2word
+	with open(ROOT_DIR+'RE_data_train.pkl', 'wb') as outp:
+		pickle.dump(id2word, outp)
+		pickle.dump(train_x, outp)
+		pickle.dump(train_y, outp)
+
+	print("Processing test data......")
+	test_sent = Lang("sentence")
+
+	test_y = []
+	with codecs.open(ROOT_DIR+"test.json", "r", encoding="utf-8") as f:
+		for line in f.readlines():
+			sentence_json = json.loads(line)
+			sentence = sentence_json["sentext"]
+			tag = sentence_json["relations"][0]["tags"]
+			test_sent.addSentence(sentence)
+			test_y.append(tag)
+
+	test_x = []
+	with codecs.open(ROOT_DIR+"test.json", "r", encoding="utf-8") as f:
+		for line in f.readlines():
+			sentence_json = json.loads(line)
+			sentence = sentence_json["sentext"]
+			indexes = [test_sent.word2index[word] for word in sentence.split(' ')]
+			indexes.append(EOS_token)
+			test_x.append(indexes)
+
+	word2id_test = test_sent.word2index
+	with open(ROOT_DIR+'RE_data_test.pkl', 'wb') as outp:
+		pickle.dump(word2id_test, outp)
+		pickle.dump(test_x, outp)
+		pickle.dump(test_y, outp)
+
+data2pkl()
+def get_one_random_pair():
+	"""
+	随机挑选一个 sentence-tag对，返回其对应的index
+	"""
+	def readLangs():
+		with open("train.json", "r") as f:
+			data = json.load(f)
+		pairs = []
+		for i in range(len(data)):
+			pair = []
+			sentencee = data[i]["sentext"]
+			tag = data[i]["tags"]
+			pair.append(sentencee)
+			pair.append(tag)
+			pairs.append(pair)
+		input = Lang("sentence")
+		output = Lang("tag")
+		return input, output, pairs
+
+	def prepareData():
+		input_lang, output_lang, pairs = readLangs()
+		print("Read %s sentence pairs" % len(pairs))
+		print("Counting words...")
+		for pair in pairs:
+			input_lang.addSentence(pair[0])
+			output_lang.addSentence(pair[1])
+		print("Counted words:")
+		print(input_lang.name, input_lang.n_words)
+		print(output_lang.name, output_lang.n_words)
+		return input_lang, output_lang, pairs
+
+	def indexesFromSentence(lang, sentence):
+		return [lang.word2index[word] for word in sentence.split(' ')]
+
+	def tensorFromSentence(lang, sentence):
+		indexes = indexesFromSentence(lang, sentence)
+		indexes.append(EOS_token)
+		return indexes  # torch.tensor(indexes, dtype=torch.long, device=device).view(-1, 1)
+
+	def tensorsFromPair(pair):
+		input_indexes = tensorFromSentence(input_lang, pair[0])
+		target_indexes = tensorFromSentence(output_lang, pair[1])
+		return (input_indexes, target_indexes)
+
+	input_lang, output_lang, pairs = prepareData()
+	tensorsFromPair(random.choice(pairs))
