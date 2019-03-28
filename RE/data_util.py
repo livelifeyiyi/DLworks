@@ -17,8 +17,8 @@ class Lang:
 		self.name = name
 		self.word2index = {}
 		self.word2count = {}
-		self.index2word = {0: "SOS", 1: "EOS"}
-		self.n_words = 2  # Count SOS and EOS
+		self.index2word = {}  # {0: "SOS", 1: "EOS"}
+		self.n_words = 0  # 2  # Count SOS and EOS
 
 	def addSentence(self, sentence):
 		for word in sentence.split(' '):
@@ -53,28 +53,32 @@ def data2pkl():
 		for line in f.readlines():
 			sentence_json = json.loads(line)
 			sentence = sentence_json["sentext"]
-			tag = sentence_json["relations"][0]["tags"]
 			input.addSentence(sentence)
-			train_y.append(tag)
-			for t in tag:
-				if tag2id == {}:
-					tag2id[t] = 0
-				if t in tag2id.keys():
-					pass
-				else:
-					tag2id[t] = len(tag2id)
-	print(tag2id)
 
 	train_x = []
 	with codecs.open(ROOT_DIR+"train.json", "r", encoding="utf-8") as f:
 		for line in f.readlines():
 			sentence_json = json.loads(line)
 			sentence = sentence_json["sentext"]
-			indexes = [input.word2index[word] for word in sentence.split(' ')]
-			indexes.append(EOS_token)
+			indexes = [input.word2index[word] for word in sentence.split()]
+			# indexes.append(EOS_token)
 			train_x.append(indexes)
+			tag = sentence_json["relations"][0]["tags"]
+			train_y.append(tag)
+			if tag2id == {}:
+				for t in tag:
+					if tag2id == {}:
+						tag2id[t] = 0
+					if t in tag2id.keys():
+						pass
+					else:
+						tag2id[t] = len(tag2id)
+	print(tag2id)
 	# word2id = input.word2index
 	id2word = input.index2word
+	print(len(id2word))
+	print(input.n_words)
+
 	with open(ROOT_DIR+'RE_data_train.pkl', 'wb') as outp:
 		pickle.dump(id2word, outp)
 		pickle.dump(train_x, outp)
@@ -97,8 +101,8 @@ def data2pkl():
 		for line in f.readlines():
 			sentence_json = json.loads(line)
 			sentence = sentence_json["sentext"]
-			indexes = [test_sent.word2index[word] for word in sentence.split(' ')]
-			indexes.append(EOS_token)
+			indexes = [test_sent.word2index[word] for word in sentence.split()]
+			# indexes.append(EOS_token)
 			test_x.append(indexes)
 
 	word2id_test = test_sent.word2index
