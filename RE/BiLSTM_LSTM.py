@@ -19,15 +19,15 @@ import os
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-SOS_token = 0
-EOS_token = 1
+# SOS_token = 0
+# EOS_token = 1
 
 
 class EncoderRNN(nn.Module):
 	def __init__(self, config, embedding_pre):
 		super(EncoderRNN, self).__init__()
 		self.batch = config['BATCH']
-		self.embedding_size = config['EMBEDDING_SIZE']
+		self.embedding_size = config['EMBEDDING_SIZE'] + 1
 		self.embedding_dim = config['EMBEDDING_DIM']
 		self.hidden_dim = config['HIDDEN_DIM']
 		# self.tag_size = config['TAG_SIZE']
@@ -41,7 +41,7 @@ class EncoderRNN(nn.Module):
 
 	def forward(self, input, hidden):
 		embedded = self.embedding(input)
-		embedded = embedded.view(-1, self.batch, self.embedding_dim)  # .view(1, 1, -1)
+		# embedded = embedded.view(-1, self.batch, self.embedding_dim)  # .view(1, 1, -1)
 		# x_t dim:(seq, batch, feature)
 		# embedded = torch.transpose(embedded, 0, 1)
 		output, hidden = self.bilstm(embedded, hidden)
@@ -57,10 +57,10 @@ class DecoderRNN(nn.Module):
 	def __init__(self, config, embedding_pre):
 		super(DecoderRNN, self).__init__()
 		self.batch = config['BATCH']
-		self.embedding_size = config['EMBEDDING_SIZE']
+		self.embedding_size = config['EMBEDDING_SIZE'] + 1
 		self.embedding_dim = config['EMBEDDING_DIM']
 		self.hidden_dim = config['HIDDEN_DIM']
-		self.tag_size = config['TAG_SIZE']
+		self.tag_size = config['TAG_SIZE'] + 1
 		self.pretrained = config['pretrained']
 		if self.pretrained:
 			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
@@ -68,13 +68,14 @@ class DecoderRNN(nn.Module):
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
 		self.lstm = nn.LSTM(input_size=self.embedding_dim*2, hidden_size=self.hidden_dim, batch_first=True)  # hidden_size, hidden_size)
 		self.hidden2tag = nn.Linear(self.hidden_dim, self.tag_size)  # out
+		self.entity_embeds = nn.Embedding(self.tag_size, self.hidden_dim)
 		self.softmax = nn.LogSoftmax(dim=1)
 
 	def forward(self, input, hidden):
-		output = self.embedding(input).view(-1, self.batch, self.embedding_dim)
-		output = F.relu(output)
+		# output = self.embedding(input).view(-1, self.batch, self.embedding_dim)   # ??? need embedding??
+		output = F.relu(input)
 		output, hidden = self.lstm(output, hidden)
-		output = self.softmax(self.hidden2tag(output[0]))
+		output = self.softmax(self.hidden2tag(output))
 		return output, hidden
 
 	def initHidden(self):
@@ -106,8 +107,9 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	encoder_optimizer.zero_grad()
 	decoder_optimizer.zero_grad()
 
-	input_length = input_tensor.size(0)
 	target_length = target_tensor.size(0)
+	seq_length = target_tensor.size(1)
+	# target_length = target_tensor.size(0)
 	loss = 0
 
 	# one word by one ?????
@@ -119,37 +121,44 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	# input batch
 	encoder_outputs, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
-	decoder_input = torch.tensor([[SOS_token]], device=device).view(1, BATCH, 1)
+	# decoder_input = torch.tensor([[SOS_token] for i in range(BATCH)], device=device).view(BATCH, 1, 1)
 
-	decoder_hidden = encoder_hidden
+	decoder_hidden = (torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1),
+					  torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1))# encoder_hidden
+	decoder_input = encoder_outputs
 
+	decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
+	decoder_output_T = decoder_output.transpose(0, 1)
+	target_tensor_T = target_tensor.transpose(0, 1)
+	# for i in range(target_length):
+	for j in range(seq_length):  # each word
+		loss += criterion(decoder_output_T[j], target_tensor_T[j])
+
+	'''
 	use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-
 	if use_teacher_forcing:
-
 		# Teacher forcing: Feed the target as the next input
 		for di in range(target_length):
-			decoder_output, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_hidden, encoder_outputs)
+			decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
 			loss += criterion(decoder_output, target_tensor[di])
 			decoder_input = target_tensor[di]  # Teacher forcing
-
 	else:
 		# Without teacher forcing: use its own predictions as the next input
 		for di in range(target_length):
-			decoder_output, decoder_hidden, decoder_attention = decoder(decoder_input, decoder_hidden, encoder_outputs)
+			decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
 			topv, topi = decoder_output.topk(1)
 			decoder_input = topi.squeeze().detach()  # detach from history as input
 
 			loss += criterion(decoder_output, target_tensor[di])
 			if decoder_input.item() == EOS_token:
 				break
-
+	'''
 	loss.backward()
 
 	encoder_optimizer.step()
 	decoder_optimizer.step()
 
-	return loss.item() / target_length  # encoder_outputs
+	return loss.item() / float(seq_length)  # encoder_outputs
 
 
 def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.01):
@@ -163,17 +172,17 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.01
 	# training_pairs = [tensorsFromPair(random.choice(pairs))
 	# 				  for i in range(n_iters)]
 
-
 	# for iter in range(1, n_iters + 1):
-		# training_pair = training_pairs[iter - 1]
+	# training_pair = training_pairs[iter - 1]
 	# for epoch in range(epoches):
-	i = 0
+	# i = 0
 	mini_batches = get_minibatches(train_datasets, BATCH)
-	for data in mini_batches:
+	batches_size = len(train_datasets) / BATCH + 1  # len(list(mini_batches))
+	for i, data in enumerate(mini_batches):
 		# for i, data in enumerate(train_dataloader, 1):
 		sentences, tags = data
-		input_tensor, input_length = padding_sequence(sentences, pad_token=EMBEDDING_SIZE+1)
-		target_tensor, target_length = padding_sequence(tags, pad_token=TAG_SIZE+1)
+		input_tensor, input_length = padding_sequence(sentences, pad_token=EMBEDDING_SIZE)
+		target_tensor, target_length = padding_sequence(tags, pad_token=TAG_SIZE)
 		if torch.cuda.is_available():
 			input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 			target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
@@ -190,18 +199,25 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.01
 		if i % print_every == 0:
 			print_loss_avg = print_loss_total / print_every
 			print_loss_total = 0
-			print('%s (%d %d%%) %.4f' % (timeSince(start, i / len(mini_batches)),
-										 i, i / len(mini_batches) * 100, print_loss_avg))
+			print(' (%d %d%%) %.4f' % (i, float(i) / batches_size * 100, print_loss_avg))
+			# print('%s (%d %d%%) %.4f' % (timeSince(start, float(i) / batches_size),
+			# i, float(i) / batches_size * 100, print_loss_avg))
 
 		# plot_loss_avg = plot_loss_total / plot_every
 		# plot_losses.append(plot_loss_avg)
 		# plot_loss_total = 0
-		i += 1
+		# i += 1
+		np.save("loss", out_losses)
 
-	np.save("loss", out_losses)
+	model_name = "./model/model_encoder_epoch" + str(epoch) + ".pkl"
+	torch.save(encoder, model_name)
+	model_name = "./model/model_decoder_epoch" + str(epoch) + ".pkl"
+	torch.save(decoder, model_name)
+	print("Model has been saved")
 	# showPlot(plot_losses)
 
-ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
+# ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
+ROOT_DIR = "NYT10/"
 # ROOT_DIR = "C:\\(O_O)!\\thesis\\5-RE with LSTM\\code\\testData\\"
 with open(ROOT_DIR+'RE_data_train.pkl', 'rb') as inp:
 	# with codecs.open(ROOT_DIR+'RE_data_train.pkl', 'rb', encoding="utf-8") as inp:
@@ -211,7 +227,7 @@ with open(ROOT_DIR+'RE_data_train.pkl', 'rb') as inp:
 	train_y = pickle.load(inp)
 
 
-EMBEDDING_SIZE = len(id2word) + 2
+EMBEDDING_SIZE = len(id2word)
 EMBEDDING_DIM = 300
 HIDDEN_DIM = 600  # 300
 TAG_SIZE = 7  # len(tag2id)
@@ -263,7 +279,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "pretrained":
 
 encoder1 = EncoderRNN(config, embedding_pre).to(device)
 decoder1 = DecoderRNN(config, embedding_pre).to(device)
-criterion = nn.NLLLoss()
+criterion = nn.NLLLoss()  # CrossEntropyLoss()
 # attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
 if torch.cuda.is_available():
 	encoder1 = encoder1.cuda()
