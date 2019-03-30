@@ -50,8 +50,8 @@ class EncoderRNN(nn.Module):
 
 	def initHidden_bilstm(self):
 		# (layers*direction, batch, hidden)each  (h_0, c_0)
-		return (torch.randn(2, self.batch, self.hidden_dim // 2, device=device),
-				torch.randn(2, self.batch, self.hidden_dim // 2, device=device))  # if use_cuda, .cuda
+		return (torch.randn(4, self.batch, self.hidden_dim // 2, device=device),
+				torch.randn(4, self.batch, self.hidden_dim // 2, device=device))  # if use_cuda, .cuda
 
 
 class DecoderRNN(nn.Module):
@@ -82,7 +82,7 @@ class DecoderRNN(nn.Module):
 
 	def initHidden(self):
 		# (layers*direction, batch, hidden)
-		return torch.zeros(1, self.batch, self.hidden_dim, device=device)
+		return torch.zeros(2, self.batch, self.hidden_dim, device=device)
 
 
 # class AttnDecoderRNN(nn.Module):
@@ -124,9 +124,17 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	encoder_outputs, encoder_hidden = encoder(input_tensor, encoder_hidden)
 
 	# decoder_input = torch.tensor([[SOS_token] for i in range(BATCH)], device=device).view(BATCH, 1, 1)
+	# for one-layer
+	# decoder_hidden = (torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1),
+	# 				  torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1))# encoder_hidden
+	# for 2 layer
+	h1 = torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1)
+	h2 = torch.cat((encoder_hidden[0][2], encoder_hidden[0][3]), 1).view(1, BATCH, -1)
+	c1 = torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1)
+	c2 = torch.cat((encoder_hidden[1][2], encoder_hidden[1][3]), 1).view(1, BATCH, -1)
+	decoder_hidden = (torch.cat((h1, h2),0),
+					  torch.cat((c1, c2), 0))
 
-	decoder_hidden = (torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1),
-					  torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1))# encoder_hidden
 	decoder_input = encoder_outputs
 
 	decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden)
@@ -220,8 +228,8 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.00
 		print("Model has been saved")
 	# showPlot(plot_losses)
 
-# ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
-ROOT_DIR = "NYT10/"
+ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
+# ROOT_DIR = "NYT10/"
 # ROOT_DIR = "C:\\(O_O)!\\thesis\\5-RE with LSTM\\code\\testData\\"
 with open(ROOT_DIR+'RE_data_train.pkl', 'rb') as inp:
 	# with codecs.open(ROOT_DIR+'RE_data_train.pkl', 'rb', encoding="utf-8") as inp:
