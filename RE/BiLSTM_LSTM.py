@@ -32,12 +32,13 @@ class EncoderRNN(nn.Module):
 		self.hidden_dim = config['HIDDEN_DIM']
 		# self.tag_size = config['TAG_SIZE']
 		self.pretrained = config['pretrained']
+		self.dropout = config['dropout']
 		if self.pretrained:
 			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
 		else:
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
 		# self.embedding = nn.Embedding(input_size, hidden_size)
-		self.bilstm = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim // 2, bidirectional=True, batch_first=True)
+		self.bilstm = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim // 2, bidirectional=True, batch_first=True, dropout=self.dropout)
 
 	def forward(self, input, hidden):
 		embedded = self.embedding(input)
@@ -62,11 +63,12 @@ class DecoderRNN(nn.Module):
 		self.hidden_dim = config['HIDDEN_DIM']
 		self.tag_size = config['TAG_SIZE'] + 1
 		self.pretrained = config['pretrained']
+		self.dropout = config['dropout']
 		if self.pretrained:
 			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
 		else:
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
-		self.lstm = nn.LSTM(input_size=self.embedding_dim*2, hidden_size=self.hidden_dim, batch_first=True)  # hidden_size, hidden_size)
+		self.lstm = nn.LSTM(input_size=self.embedding_dim*2, hidden_size=self.hidden_dim, batch_first=True, dropout=self.dropout)  # hidden_size, hidden_size)
 		self.hidden2tag = nn.Linear(self.hidden_dim, self.tag_size)  # out
 		self.entity_embeds = nn.Embedding(self.tag_size, self.hidden_dim)
 		self.softmax = nn.LogSoftmax(dim=1)
@@ -177,8 +179,10 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.01
 	# for epoch in range(epoches):
 	# i = 0
 	mini_batches = get_minibatches(train_datasets, BATCH)
-	batches_size = len(train_datasets) / BATCH + 1  # len(list(mini_batches))
+	batches_size = len(train_datasets[0]) // BATCH  # len(list(mini_batches))
 	for i, data in enumerate(mini_batches):
+		if i == batches_size:
+			break
 		# for i, data in enumerate(train_dataloader, 1):
 		sentences, tags = data
 		input_tensor, input_length = padding_sequence(sentences, pad_token=EMBEDDING_SIZE)
@@ -207,7 +211,7 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.01
 		# plot_losses.append(plot_loss_avg)
 		# plot_loss_total = 0
 		# i += 1
-		np.save("loss", out_losses)
+	np.save("loss", out_losses)
 
 	model_name = "./model/model_encoder_epoch" + str(epoch) + ".pkl"
 	torch.save(encoder, model_name)
@@ -235,6 +239,8 @@ BATCH = 128  # 100
 EPOCHS = 10  # 100
 # MAX_LENGTH = 188  # max length of the sentences
 VECTOR_NAME = "vector.txt"
+DROPOUT = 0.5
+LR = 0.1  # learning rate
 
 config = {}
 config['EMBEDDING_SIZE'] = EMBEDDING_SIZE
@@ -243,7 +249,7 @@ config['HIDDEN_DIM'] = HIDDEN_DIM
 config['TAG_SIZE'] = TAG_SIZE
 config['BATCH'] = BATCH
 config["pretrained"] = False
-
+config["dropout"] = DROPOUT
 
 embedding_pre = []
 if len(sys.argv) == 2 and sys.argv[1] == "pretrained":
@@ -290,4 +296,4 @@ for epoch in range(EPOCHS):
 	print("Epoch-" + str(epoch) + "."*10)
 	train_datasets = [train_x, train_y]  # D.TensorDataset(train_x, train_y)
 
-	trainEpoches(encoder1, decoder1, criterion)
+	trainEpoches(encoder1, decoder1, criterion, learning_rate=LR)
