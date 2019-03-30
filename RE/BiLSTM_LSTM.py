@@ -38,7 +38,7 @@ class EncoderRNN(nn.Module):
 		else:
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
 		# self.embedding = nn.Embedding(input_size, hidden_size)
-		self.bilstm = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim // 2, bidirectional=True, batch_first=True, dropout=self.dropout)
+		self.bilstm = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim // 2, num_layers=2, bidirectional=True, batch_first=True, dropout=self.dropout)
 
 	def forward(self, input, hidden):
 		embedded = self.embedding(input)
@@ -68,7 +68,7 @@ class DecoderRNN(nn.Module):
 			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
 		else:
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
-		self.lstm = nn.LSTM(input_size=self.embedding_dim*2, hidden_size=self.hidden_dim, batch_first=True, dropout=self.dropout)  # hidden_size, hidden_size)
+		self.lstm = nn.LSTM(input_size=self.embedding_dim*2, hidden_size=self.hidden_dim, batch_first=True, num_layers=2, dropout=self.dropout)  # hidden_size, hidden_size)
 		self.hidden2tag = nn.Linear(self.hidden_dim, self.tag_size)  # out
 		self.entity_embeds = nn.Embedding(self.tag_size, self.hidden_dim)
 		self.softmax = nn.LogSoftmax(dim=1)
@@ -295,8 +295,6 @@ if torch.cuda.is_available():
 
 for epoch in range(EPOCHS):
 	print("Epoch-" + str(epoch) + "."*10)
-	random.shuffle(train_x)
-	random.shuffle(train_y)
 	train_datasets = [train_x, train_y]  # D.TensorDataset(train_x, train_y)
 
 	trainEpoches(encoder1, decoder1, criterion, learning_rate=LR, l2=L2)
