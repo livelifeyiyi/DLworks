@@ -163,14 +163,14 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	return loss.item() / float(seq_length)  # encoder_outputs
 
 
-def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.01):
+def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.001, l2=0.0001):
 	start = time.time()
 	out_losses = []
 	print_loss_total = 0  # Reset every print_every
 	# plot_loss_total = 0  # Reset every plot_every
 
-	encoder_optimizer = optim.SGD(encoder.parameters(), lr=learning_rate)
-	decoder_optimizer = optim.SGD(decoder.parameters(), lr=learning_rate)
+	encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate, weight_decay=l2)  # SGD
+	decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate, weight_decay=l2)
 	# training_pairs = [tensorsFromPair(random.choice(pairs))
 	# 				  for i in range(n_iters)]
 
@@ -212,12 +212,12 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.01
 		# plot_loss_total = 0
 		# i += 1
 	np.save("loss", out_losses)
-
-	model_name = "./model/model_encoder_epoch" + str(epoch) + ".pkl"
-	torch.save(encoder, model_name)
-	model_name = "./model/model_decoder_epoch" + str(epoch) + ".pkl"
-	torch.save(decoder, model_name)
-	print("Model has been saved")
+	if epoch % 10 == 0:
+		model_name = "./model/model_encoder_epoch" + str(epoch) + ".pkl"
+		torch.save(encoder, model_name)
+		model_name = "./model/model_decoder_epoch" + str(epoch) + ".pkl"
+		torch.save(decoder, model_name)
+		print("Model has been saved")
 	# showPlot(plot_losses)
 
 # ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
@@ -236,11 +236,12 @@ EMBEDDING_DIM = 300
 HIDDEN_DIM = 600  # 300
 TAG_SIZE = 7  # len(tag2id)
 BATCH = 128  # 100
-EPOCHS = 10  # 100
+EPOCHS = 100  # 100
 # MAX_LENGTH = 188  # max length of the sentences
 VECTOR_NAME = "vector.txt"
 DROPOUT = 0.5
-LR = 0.1  # learning rate
+LR = 0.001  # learning rate
+L2 = 0.0001
 
 config = {}
 config['EMBEDDING_SIZE'] = EMBEDDING_SIZE
@@ -294,6 +295,8 @@ if torch.cuda.is_available():
 
 for epoch in range(EPOCHS):
 	print("Epoch-" + str(epoch) + "."*10)
+	random.shuffle(train_x)
+	random.shuffle(train_y)
 	train_datasets = [train_x, train_y]  # D.TensorDataset(train_x, train_y)
 
-	trainEpoches(encoder1, decoder1, criterion, learning_rate=LR)
+	trainEpoches(encoder1, decoder1, criterion, learning_rate=LR, l2=L2)
