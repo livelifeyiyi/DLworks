@@ -228,8 +228,8 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.00
 		print("Model has been saved")
 	# showPlot(plot_losses)
 
-ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
-# ROOT_DIR = "NYT10/"
+# ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
+ROOT_DIR = "NYT10/"
 # ROOT_DIR = "C:\\(O_O)!\\thesis\\5-RE with LSTM\\code\\testData\\"
 with open(ROOT_DIR+'RE_data_train.pkl', 'rb') as inp:
 	# with codecs.open(ROOT_DIR+'RE_data_train.pkl', 'rb', encoding="utf-8") as inp:
