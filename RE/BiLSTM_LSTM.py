@@ -103,7 +103,7 @@ def timeSince(since, percent):
 teacher_forcing_ratio = 0.5
 
 
-def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion):  # max_length=MAX_LENGTH
+def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, BATCH):  # max_length=MAX_LENGTH
 	encoder_hidden = encoder.initHidden_bilstm()
 
 	encoder_optimizer.zero_grad()
@@ -168,7 +168,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	encoder_optimizer.step()
 	decoder_optimizer.step()
 
-	return loss.item() / float(seq_length)  # encoder_outputs
+	return loss.item() / float(seq_length), encoder_outputs, decoder_output
 
 
 def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.001, l2=0.0001):
@@ -228,81 +228,83 @@ def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.00
 		print("Model has been saved")
 	# showPlot(plot_losses)
 
-# ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
-ROOT_DIR = "NYT10/"
-# ROOT_DIR = "C:\\(O_O)!\\thesis\\5-RE with LSTM\\code\\testData\\"
-with open(ROOT_DIR+'RE_data_train.pkl', 'rb') as inp:
-	# with codecs.open(ROOT_DIR+'RE_data_train.pkl', 'rb', encoding="utf-8") as inp:
-	id2word = pickle.load(inp)  # , encoding='latin1'
-	# tag2id = pickle.load(inp)
-	train_x = pickle.load(inp)  # train sentence
-	train_y = pickle.load(inp)
+
+def run_this_model_only():
+	# ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
+	ROOT_DIR = "NYT10/"
+	# ROOT_DIR = "C:\\(O_O)!\\thesis\\5-RE with LSTM\\code\\testData\\"
+	with open(ROOT_DIR+'RE_data_train.pkl', 'rb') as inp:
+		# with codecs.open(ROOT_DIR+'RE_data_train.pkl', 'rb', encoding="utf-8") as inp:
+		id2word = pickle.load(inp)  # , encoding='latin1'
+		# tag2id = pickle.load(inp)
+		train_x = pickle.load(inp)  # train sentence
+		train_y = pickle.load(inp)
 
 
-EMBEDDING_SIZE = len(id2word)
-EMBEDDING_DIM = 300
-HIDDEN_DIM = 600  # 300
-TAG_SIZE = 7  # len(tag2id)
-BATCH = 128  # 100
-EPOCHS = 100  # 100
-# MAX_LENGTH = 188  # max length of the sentences
-VECTOR_NAME = "vector.txt"
-DROPOUT = 0.5
-LR = 0.001  # learning rate
-L2 = 0.0001
+	EMBEDDING_SIZE = len(id2word)
+	EMBEDDING_DIM = 300
+	HIDDEN_DIM = 600  # 300
+	TAG_SIZE = 7  # len(tag2id)
+	BATCH = 128  # 100
+	EPOCHS = 100  # 100
+	# MAX_LENGTH = 188  # max length of the sentences
+	VECTOR_NAME = "vector.txt"
+	DROPOUT = 0.5
+	LR = 0.001  # learning rate
+	L2 = 0.0001
 
-config = {}
-config['EMBEDDING_SIZE'] = EMBEDDING_SIZE
-config['EMBEDDING_DIM'] = EMBEDDING_DIM
-config['HIDDEN_DIM'] = HIDDEN_DIM
-config['TAG_SIZE'] = TAG_SIZE
-config['BATCH'] = BATCH
-config["pretrained"] = False
-config["dropout"] = DROPOUT
+	config = {}
+	config['EMBEDDING_SIZE'] = EMBEDDING_SIZE
+	config['EMBEDDING_DIM'] = EMBEDDING_DIM
+	config['HIDDEN_DIM'] = HIDDEN_DIM
+	config['TAG_SIZE'] = TAG_SIZE
+	config['BATCH'] = BATCH
+	config["pretrained"] = False
+	config["dropout"] = DROPOUT
 
-embedding_pre = []
-if len(sys.argv) == 2 and sys.argv[1] == "pretrained":
-	print("use pretrained embedding")
-	config["pretrained"] = True
-	word2vec = {}
-	with codecs.open(VECTOR_NAME, 'r', 'utf-8') as input_data:
-		for line in input_data.readlines():
-			word2vec[line.split()[0]] = map(eval, line.split()[1:])
+	embedding_pre = []
+	if len(sys.argv) == 2 and sys.argv[1] == "pretrained":
+		print("use pretrained embedding")
+		config["pretrained"] = True
+		word2vec = {}
+		with codecs.open(VECTOR_NAME, 'r', 'utf-8') as input_data:
+			for line in input_data.readlines():
+				word2vec[line.split()[0]] = map(eval, line.split()[1:])
 
-	unknow_pre = []
-	unknow_pre.extend([1] * 100)
-	embedding_pre.append(unknow_pre)  # wordvec id 0
-	for word in word2id:
-		if word2vec.has_key(word):
-			embedding_pre.append(word2vec[word])
-		else:
-			embedding_pre.append(unknow_pre)
+		unknow_pre = []
+		unknow_pre.extend([1] * 100)
+		embedding_pre.append(unknow_pre)  # wordvec id 0
+		for word in word2id:
+			if word2vec.has_key(word):
+				embedding_pre.append(word2vec[word])
+			else:
+				embedding_pre.append(unknow_pre)
 
-	embedding_pre = np.asarray(embedding_pre)
-	print(embedding_pre.shape)
-
-
-# if torch.cuda.is_available():
-# 	train_x = torch.cuda.LongTensor(train_x, device=device)  # .cuda()  # train_x[:len(train_x) - len(train_x) % BATCH]
-# 	train_y = torch.cuda.LongTensor(train_y, device=device)  # .cuda()  # train_y[:len(train_x) - len(train_x) % BATCH]
-# else:
-# 	train_x = torch.LongTensor(train_x, device=device)  # .cuda()
-# 	train_y = torch.LongTensor(train_y, device=device)  # .cuda()
-
-# train_dataloader = D.DataLoader(train_datasets, BATCH, True)
+		embedding_pre = np.asarray(embedding_pre)
+		print(embedding_pre.shape)
 
 
-encoder1 = EncoderRNN(config, embedding_pre).to(device)
-decoder1 = DecoderRNN(config, embedding_pre).to(device)
-criterion = nn.NLLLoss()  # CrossEntropyLoss()
-# attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
-if torch.cuda.is_available():
-	encoder1 = encoder1.cuda()
-	attn_decoder1 = decoder1.cuda()
-	criterion = criterion.cuda()
+	# if torch.cuda.is_available():
+	# 	train_x = torch.cuda.LongTensor(train_x, device=device)  # .cuda()  # train_x[:len(train_x) - len(train_x) % BATCH]
+	# 	train_y = torch.cuda.LongTensor(train_y, device=device)  # .cuda()  # train_y[:len(train_x) - len(train_x) % BATCH]
+	# else:
+	# 	train_x = torch.LongTensor(train_x, device=device)  # .cuda()
+	# 	train_y = torch.LongTensor(train_y, device=device)  # .cuda()
 
-for epoch in range(EPOCHS):
-	print("Epoch-" + str(epoch) + "."*10)
-	train_datasets = [train_x, train_y]  # D.TensorDataset(train_x, train_y)
+	# train_dataloader = D.DataLoader(train_datasets, BATCH, True)
 
-	trainEpoches(encoder1, decoder1, criterion, learning_rate=LR, l2=L2)
+
+	encoder1 = EncoderRNN(config, embedding_pre).to(device)
+	decoder1 = DecoderRNN(config, embedding_pre).to(device)
+	criterion = nn.NLLLoss()  # CrossEntropyLoss()
+	# attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
+	if torch.cuda.is_available():
+		encoder1 = encoder1.cuda()
+		attn_decoder1 = decoder1.cuda()
+		criterion = criterion.cuda()
+
+	for epoch in range(EPOCHS):
+		print("Epoch-" + str(epoch) + "."*10)
+		train_datasets = [train_x, train_y]  # D.TensorDataset(train_x, train_y)
+
+		trainEpoches(encoder1, decoder1, criterion, learning_rate=LR, l2=L2)
