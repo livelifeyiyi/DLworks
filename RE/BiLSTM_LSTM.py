@@ -132,7 +132,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	h2 = torch.cat((encoder_hidden[0][2], encoder_hidden[0][3]), 1).view(1, BATCH, -1)
 	c1 = torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1)
 	c2 = torch.cat((encoder_hidden[1][2], encoder_hidden[1][3]), 1).view(1, BATCH, -1)
-	decoder_hidden = (torch.cat((h1, h2),0),
+	decoder_hidden = (torch.cat((h1, h2), 0),
 					  torch.cat((c1, c2), 0))
 
 	decoder_input = encoder_outputs
