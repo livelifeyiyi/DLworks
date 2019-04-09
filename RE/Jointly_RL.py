@@ -52,7 +52,7 @@ class RLModel(nn.Module):
 		self.noisy_sentences_vec = np.array([])  # torch.from_numpy(np.array([]))
 		# self.criterion = nn.CrossEntropyLoss()
 
-	# ??????
+	# get the tag with the max probability
 	def sample(self, prob, training, position, preoptions=None):
 		if not training:
 			return torch.max(prob, 0)[1]
@@ -65,12 +65,12 @@ class RLModel(nn.Module):
 		training = True
 		if torch.cuda.is_available():
 			mem = Variable(torch.cuda.FloatTensor(self.statedim, ).fill_(0))
-			action = Variable(torch.cuda.LongTensor(1, ).fill_(0))
-			rel_action = Variable(torch.cuda.LongTensor(1, ).fill_(0))
+			# action = Variable(torch.cuda.LongTensor(1, ).fill_(0))
+			# rel_action = Variable(torch.cuda.LongTensor(1, ).fill_(0))
 		else:
 			mem = Variable(torch.FloatTensor(self.statedim, ).fill_(0))
-			action = Variable(torch.LongTensor(1, ).fill_(0))
-			rel_action = Variable(torch.LongTensor(1, ).fill_(0))
+			# action = Variable(torch.LongTensor(1, ).fill_(0))
+			# rel_action = Variable(torch.LongTensor(1, ).fill_(0))
 		noisy_vec_mean = np.array([])
 		for sentence_id in range(len(self.sentences)):
 			relation_actions, relation_actprobs, noisy_actions, noisy_actprobs = [], [], [], []
@@ -80,8 +80,9 @@ class RLModel(nn.Module):
 
 					mem, prob_relation, prob_noisy = relation_model(self.encoder_output[sentence_id], self.decoder_output[sentence_id],
 																	torch.from_numpy(noisy_vec_mean), mem, training)
-
+					# get relation tag
 					action_realtion = self.sample(prob_relation, training, realtion)
+					# get relation tag's corresponding probability
 					actprob_relation = prob_relation[action_realtion]
 
 					action_noisy = self.sample(prob_noisy, training, realtion)
@@ -95,10 +96,11 @@ class RLModel(nn.Module):
 				# cal reward of noisy classification ## by using the context based word vec similarity
 				reward_noisy = self.calculate_similarity(realtion["rtex"], self.sentences[sentence_id]["sentext"])
 				realtion["reward_noisy"] = reward_noisy
+				print("Reward of noisy: " + str(reward_noisy))
+
 				if reward_noisy < 0.3:
 					self.noisy_sentences_vec = np.concatenate(self.noisy_sentences_vec, self.encoder_output)
-
-				# vector of removed sentences
+				# vector of removed/noisy sentences
 				noisy_vec_mean = np.mean(self.noisy_sentences_vec, axis=1)
 				# cal reward of relation classification
 				# cal total reward of relation classification and entity extraction (decoder_output)
@@ -109,6 +111,7 @@ class RLModel(nn.Module):
 					entity_tags.append(entity_tag)
 					entity_probs.append(entity_prob)
 				loss = Optimize.optimize(relation_actions, relation_actprobs, realtion, entity_tags, entity_probs)
+				print("Reward of jointly RE adn RL: " + str(loss))
 
 				# optimize
 				# loss = self.criterion(q_eval, q_target)  # mse 作为 loss 函数
@@ -116,9 +119,6 @@ class RLModel(nn.Module):
 				self.optimizer.zero_grad()
 				loss.backward()
 				self.optimizer.step()
-
-	def reward(self):
-		pass
 
 	def calculate_similarity(self, relation_name, sentence):
 		relation_words = relation_name.split("/")
