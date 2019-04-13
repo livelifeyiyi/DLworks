@@ -12,7 +12,7 @@ from torch import optim
 import torch.nn.functional as F
 import torch.utils.data as D
 from torch.autograd import Variable
-from general_utils import get_minibatches, padding_sequence
+from TFgirl.RE.general_utils import get_minibatches, padding_sequence
 from torch.nn.utils.rnn import pad_sequence
 import os
 
@@ -26,16 +26,16 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class EncoderRNN(nn.Module):
 	def __init__(self, config, embedding_pre):
 		super(EncoderRNN, self).__init__()
-		self.batch = config['BATCH']
-		self.embedding_size = config['EMBEDDING_SIZE'] + 1
-		self.embedding_dim = config['EMBEDDING_DIM']
-		self.hidden_dim = config['HIDDEN_DIM']
+		self.batch = config.batchsize
+		self.embedding_dim = config.embedding_dim
+		self.hidden_dim = config.hidden_dim
 		# self.tag_size = config['TAG_SIZE']
-		self.pretrained = config['pretrained']
-		self.dropout = config['dropout']
+		self.pretrained = config.pretrain_vec
+		self.dropout = config.dropout
 		if self.pretrained:
 			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
 		else:
+			self.embedding_size = config.embedding_size + 1
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
 		# self.embedding = nn.Embedding(input_size, hidden_size)
 		self.bilstm = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim // 2, num_layers=2, bidirectional=True, batch_first=True, dropout=self.dropout)
@@ -57,27 +57,28 @@ class EncoderRNN(nn.Module):
 class DecoderRNN(nn.Module):
 	def __init__(self, config, embedding_pre):
 		super(DecoderRNN, self).__init__()
-		self.batch = config['BATCH']
-		self.embedding_size = config['EMBEDDING_SIZE'] + 1
-		self.embedding_dim = config['EMBEDDING_DIM']
-		self.hidden_dim = config['HIDDEN_DIM']
-		self.tag_size = config['TAG_SIZE'] + 1
-		self.pretrained = config['pretrained']
-		self.dropout = config['dropout']
+		self.batch = config.batchsize
+		self.embedding_dim = config.embedding_dim
+		self.hidden_dim = config.hidden_dim
+		# self.tag_size = config['TAG_SIZE']
+		self.pretrained = config.pretrain_vec
+		self.dropout = config.dropout
+		self.tag_size = config.entity_tag_size + 1
 		if self.pretrained:
 			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
 		else:
+			self.embedding_size = config.embedding_size + 1
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
 		self.lstm = nn.LSTM(input_size=self.embedding_dim*2, hidden_size=self.hidden_dim, batch_first=True, num_layers=2, dropout=self.dropout)  # hidden_size, hidden_size)
-		self.hidden2tag = nn.Linear(self.hidden_dim, self.tag_size)  # out
 		self.entity_embeds = nn.Embedding(self.tag_size, self.hidden_dim)
-		self.softmax = nn.LogSoftmax(dim=1)
+		# self.hidden2tag = nn.Linear(self.hidden_dim, self.tag_size)  # out
+		# self.softmax = nn.LogSoftmax(dim=1)
 
 	def forward(self, input, hidden):
 		# output = self.embedding(input).view(-1, self.batch, self.embedding_dim)   # ??? need embedding??
 		output = F.relu(input)
 		output, hidden = self.lstm(output, hidden)
-		output = self.softmax(self.hidden2tag(output))
+		# output = self.softmax(self.hidden2tag(output))
 		return output, hidden
 
 	def initHidden(self):

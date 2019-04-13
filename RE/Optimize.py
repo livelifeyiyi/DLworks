@@ -103,8 +103,8 @@ def calcBotFinalReward(bot_action, gold_labels, bot_bias=0.):
 					ok = True
 					for t in range(lenth):
 						if label['tags'][t] != bot_action[j][t]:
-							ok = False;
-							break;
+							ok = False
+							break
 					if ok:
 						r[j] = 1.0
 			j += 1

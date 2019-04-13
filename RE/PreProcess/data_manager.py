@@ -34,7 +34,7 @@ class DataManager:
 		for i in range(len(wordssorted)):
 			self.words[wordssorted[i][0]] = i
 		OOV = len(wordssorted)
-
+		print(OOV)
 		# get text
 		for name in ["train", "test", "dev"]:
 			# self.data2id[name] = []
@@ -82,3 +82,4 @@ class DataManager:
 						t['type'] = self.relations.index('UKN') + 1
 		print(self.relationcnt)
 		print(self.relations)
+		print(self.relation_count)
