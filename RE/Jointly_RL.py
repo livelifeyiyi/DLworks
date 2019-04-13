@@ -22,7 +22,7 @@ class RelationModel(nn.Module):
 		self.hid2state = nn.Linear(dim * 3 + statedim, statedim)
 		self.state2prob_relation = nn.Linear(statedim, relation_count + 1)
 		self.state2prob_noisy = nn.Linear(statedim, noisy_count + 1)
-		self.att_weight = nn.Parameter(torch.randn(self.batch, 1, self.hidden_dim))
+		self.att_weight = nn.Parameter(torch.randn(1, 1, self.dim))  # (self.batch, 1, self.hidden_dim)
 
 	def attention(self, H):
 		M = F.tanh(H)
@@ -50,6 +50,9 @@ class RLModel(nn.Module):
 		self.decoder_output = decoder_output
 		self.vec_model = KeyedVectors.load_word2vec_format(wv, binary=False)
 		self.noisy_sentences_vec = np.array([])  # torch.from_numpy(np.array([]))
+		self.decoder_hidden2tag = nn.Linear(self.hidden_dim, self.tag_size)  # out
+		self.decoder_softmax = nn.LogSoftmax(dim=1)
+
 		# self.criterion = nn.CrossEntropyLoss()
 
 	# get the tag with the max probability
@@ -62,6 +65,9 @@ class RLModel(nn.Module):
 			return torch.multinomial(prob, 1)
 
 	def forward(self, round_num, relation_model):
+		# calculate the probability of each entity tag
+		decoder_output_prob = self.decoder_softmax(self.decoder_hidden2tag(self.decoder_output))
+
 		training = True
 		if torch.cuda.is_available():
 			mem = Variable(torch.cuda.FloatTensor(self.statedim, ).fill_(0))
@@ -105,9 +111,9 @@ class RLModel(nn.Module):
 				# cal reward of relation classification
 				# cal total reward of relation classification and entity extraction (decoder_output)
 				entity_tags, entity_probs = [], []
-				for i in range(len(self.decoder_output)):  # each word
-					entity_tag = self.sample(self.decoder_output[i], training, realtion)
-					entity_prob = self.decoder_output[i][entity_tag]
+				for i in range(len(decoder_output_prob)):  # each word
+					entity_tag = self.sample(decoder_output_prob[i], training, realtion)
+					entity_prob = decoder_output_prob[i][entity_tag]
 					entity_tags.append(entity_tag)
 					entity_probs.append(entity_prob)
 				loss = Optimize.optimize(relation_actions, relation_actprobs, realtion, entity_tags, entity_probs)
