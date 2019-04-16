@@ -9,6 +9,8 @@ def calcF1(acc, cnt, tot, beta=1.0):
 		return 0
 	precision = float(acc) / float(cnt)
 	recall = float(acc) / float(tot)
+	if recall > 1:
+		recall = 1
 	if precision + recall < 1e-5:
 		return 0
 	return (1 + beta * beta) * precision * recall / (beta * beta * precision + recall)
@@ -49,17 +51,52 @@ def calc_re_acc(RE_action, bot_action, gold_labels):
 """
 
 
+def calcREReward(top_action, gold_labels):
+	# if predicted action == elation_label, r=1, else r=0
+	lenth = len(top_action)  # round number
+	r = [0. for i in range(lenth)]
+	# rem = [0 for i in range(len(gold_labels))]
+	for i in range(lenth)[::-1]:
+		if top_action[i] > 0:
+			ok = -1
+			if isinstance(gold_labels, int):
+				if gold_labels == top_action[i]:
+					ok = 1
+			else:
+				# for j, label in enumerate(gold_labels):
+				if gold_labels[i] == top_action[i]:
+					ok = 1
+					# if rem[j] == 0:
+					# 	ok = 0.5
+					# 	rem[j] = 1
+					# 	break
+					# else:
+					# 	ok = -0.2
+			r[i] = ok
+	return r
+
+
 def calcREFinalReward(RE_actions, labels, top_bias=0.):
 	r = 0.
 	sample_round = len(RE_actions)
-	acc, cnt, tot = 0, 0, len(labels)
+	acc, cnt, tot = 0, 0, 1
+	if isinstance(labels, int):
+		tot = 1
+	elif isinstance(labels, list):
+		tot = len(labels)
 
 	for i in range(sample_round):
-		for label in labels:
-			if RE_actions[i] == label['type']:
+		if tot == 1:
+			if RE_actions[i] == labels:  # ['type']:
 				acc += 1
 			if RE_actions[i] > 0:
 				cnt += 1
+		else:
+			for label in labels:
+				if RE_actions[i] == label:  # ['type']:
+					acc += 1
+				if RE_actions[i] > 0:
+					cnt += 1
 	# a1, t1, c1 = calc_re_acc(top_action, None, gold_labels)
 	if cnt != 0:
 		r = calcF1(acc, cnt, tot, beta=0.9)
@@ -71,67 +108,79 @@ def calcREFinalReward(RE_actions, labels, top_bias=0.):
 	return r - top_bias
 
 
-def calcBotReward(bot_action, gold_labels):
-	lenth = len(bot_action)
-	r = [[0. for i in range(lenth)] for j in range(len(bot_action))]
-	j = 0
-	for i in range(lenth):
+def calcEntityReward(bot_action, gold_labels):
+	lenth = len(gold_labels)
+	r = [0. for i in range(lenth)]  # for j in range(len(bot_action))]
+	# j = 0
+	# for i in range(lenth):
 		# if top_action[i] > 0:
-			for label in gold_labels:
+			# for label in gold_labels:
 				# if label['type'] == top_action[i]:
-					for t in range(lenth):
-						if label['tags'][t] == bot_action[j][t]:
-							if label['tags'][t] in [4, 5, 6]:
-								r[j][t] = 0.5
-							elif label['tags'][t] in [1, 2, 3]:
-								r[j][t] = 0.2
-						else:
-							r[j][t] = -0.5
-			j += 1
+	for t in range(lenth):
+		if gold_labels[t] == bot_action[t]:
+			if gold_labels[t] in [1, 2, 4, 5]:
+				r[t] = 1  # source and target entities
+			elif gold_labels[t] in [3, 6]:
+				r[t] = 0.7  # non-concerned entities
+			elif gold_labels[t] in [0]:
+				r[t] = 0.3  # non-entities
+		else:  # wrong labeled
+			r[t] = -0.5
+	# j += 1
 	return r
 
 
-def calcBotFinalReward(bot_action, gold_labels, bot_bias=0.):
+def calcEntityFinalReward(bot_action, gold_labels, bot_bias=0.):
 	lenth = len(gold_labels)
-	r = [0. for j in range(len(bot_action))]
-	j = 0
+	r = [0. for j in range(lenth)]
+	# j = 0
 	for i in range(lenth):
 		# if top_action[i] > 0:
-			r[j] = -1.0
-			for label in gold_labels:
+		r[i] = -1.0
+			# for label in gold_labels:
 				# if label['type'] == top_action[i]:
-					ok = True
-					for t in range(lenth):
-						if label['tags'][t] != bot_action[j][t]:
-							ok = False
-							break
-					if ok:
-						r[j] = 1.0
-			j += 1
-	for j in range(len(bot_action)):
+		if gold_labels[i] == bot_action[i]:
+			ok = True
+		# for t in range(lenth):
+		if gold_labels[i] != bot_action[i]:
+			ok = False
+			# break
+		if ok:
+			r[i] = 1.0
+
+	for j in range(lenth):
 		r[j] -= bot_bias
 	return r
 
 
 def calcBotGrad(bot_action, bot_actprob, bot_reward, bot_final_reward, pretrain=False):
-	lenth = len(bot_action)
+	lenth = len(bot_reward)
 	bot_tot_reward = [0. for i in range(lenth)]
-	grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0))
+	if torch.cuda.is_available():
+		grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0), requires_grad=True)
+	else:
+		grads = autograd.Variable(torch.FloatTensor(1, ).fill_(0), requires_grad=True)
 	j = 0
 	for i in range(lenth):
 		# if top_action[i] > 0:
-			bot_tot_reward[i] = sum(bot_reward[j]) / lenth + bot_final_reward[j]  #
-			for k in range(lenth)[::-1]:
-				to_grad = -torch.log(bot_actprob[j][k])
-				if not pretrain:
-					to_grad *= autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(bot_tot_reward[i]))
-				if bot_action[j][k] == 0:
-					to_grad *= 0.3
-				elif bot_action[j][k] == 3 or bot_action[j][k] == 6:
-					to_grad *= 0.7
+			bot_tot_reward[i] = bot_reward[j] / lenth + bot_final_reward[j]  #
+			# for k in range(lenth)[::-1]:
+			tmp = bot_actprob[j]
+			if tmp < 0:
+				tmp = 1 - tmp
+			to_grad = -torch.log(tmp)  # [k]
+			if not pretrain:
+				if torch.cuda.is_available():
+					to_grad = to_grad * autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(bot_tot_reward[i]), requires_grad=True)
 				else:
-					to_grad *= 1.0
-				grads = grads + to_grad
+					to_grad = to_grad * autograd.Variable(torch.FloatTensor(1, ).fill_(bot_tot_reward[i]), requires_grad=True)
+			if bot_action[j] == 0:  # [k]
+				to_grad *= 0.3
+			elif bot_action[j] == 3 or bot_action[j] == 6:  # [k]
+				to_grad *= 0.7
+			else:
+				to_grad *= 1.0
+			grads = grads + to_grad
 			j += 1
 	return bot_tot_reward, grads
 
@@ -139,35 +188,23 @@ def calcBotGrad(bot_action, bot_actprob, bot_reward, bot_final_reward, pretrain=
 def calcTopGrad(top_action, top_actprob, top_reward, top_final_reward, pretrain=False):
 	lenth = len(top_action)
 	decay_reward = top_final_reward
-	grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0))
+	if torch.cuda.is_available():
+		grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0), requires_grad=True)
+	else:
+		grads = autograd.Variable(torch.FloatTensor(1, ).fill_(0), requires_grad=True)
 	for i in range(lenth)[::-1]:
 		decay_reward = decay_reward * 0.95 + top_reward[i]
-		to_grad = -torch.log(top_actprob[i])
+		to_grad = -torch.log(top_actprob[i]).float()
 		if not pretrain:
-			to_grad *= autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(decay_reward))
+			if torch.cuda.is_available():
+				to_grad = to_grad * autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(decay_reward), requires_grad=True)
+			else:
+				to_grad = to_grad * autograd.Variable(torch.FloatTensor(1, ).fill_(decay_reward), requires_grad=True)
 		if top_action[i] == 0:
 			to_grad *= 0.3
 		grads = grads + to_grad
 	return grads
 
-
-def calcTopReward(top_action, gold_labels):
-	lenth = len(top_action)
-	r = [0. for i in range(lenth)]
-	rem = [0 for i in range(len(gold_labels))]
-	for i in range(lenth)[::-1]:
-		if top_action[i] > 0:
-			ok = -1
-			for j, label in enumerate(gold_labels):
-				if label['type'] == top_action[i]:
-					if rem[j] == 0:
-						ok = 0.5
-						rem[j] = 1
-						break
-					else:
-						ok = -0.2
-			r[i] = ok
-	return r
 
 
 
@@ -195,32 +232,50 @@ def optimize(top_action, top_actprob, gold_labels, top_bias=0.):
 '''
 
 
-def optimize(RE_actions, top_actprobs, labels, entity_actions, entity_probs):
+def optimize(RE_actions, top_actprobs, relation_label, entity_label, entity_actions, entity_probs, entity_loss):  #
 	sample_round = len(RE_actions)
 
 	top_bias = 0.
 	# for i in range(sample_round):
-	top_bias += calcREFinalReward(RE_actions, labels, 0.)
+	top_bias += calcREFinalReward(RE_actions, relation_label, 0.)
 	top_bias /= sample_round
-	top_reward = calcTopReward(RE_actions, labels)
+	top_reward = calcREReward(RE_actions, relation_label)
 	# grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0))
 
-	bot_bias, bot_cnt = 0., 0
-	tmp = calcBotFinalReward(entity_actions, labels, 0.)
-	bot_cnt += len(tmp)
-	bot_bias += np.sum(tmp)
+	# bot_bias, bot_cnt = 0., 0
+	tmp = calcEntityFinalReward(entity_actions, entity_label, 0.)
+	# bot_cnt += len(tmp)
+	# bot_bias += np.sum(tmp)
+	bot_bias = -entity_loss
 
-	bot_reward = calcBotReward(entity_actions, labels)
-	bot_final_reward = calcBotFinalReward(entity_actions, labels, bot_bias)
+	bot_reward = calcEntityReward(entity_actions, entity_label)
+	bot_final_reward = [x-bot_bias for x in tmp]
+	# bot_final_reward = calcEntityFinalReward(entity_actions, entity_label, bot_bias)
+	# tmp-= bot_bias
 	bot_tot_reward, grads = calcBotGrad(entity_actions, entity_probs, bot_reward, bot_final_reward)
 	for i in range(sample_round):
 		top_reward[i] += bot_tot_reward[0]
 	# if "RE" in mode:
 	grads += calcTopGrad(RE_actions, top_actprobs, top_reward, top_bias, pretrain=False)
 	loss = grads.cpu().data[0]
-	grads.backward()
+	# grads.backward(retain_graph=True)
+
 	#
 	# loss = .0
 	# for i in range(sample_round):
 	# 	loss += optimize(RE_actions[i], top_actprobs[i], labels, top_bias)
-	return loss   # / sample_round
+	return grads  # loss   # / sample_round
+
+#
+# RE_actions = [torch.from_numpy(np.array([11])), torch.from_numpy(np.array([0])), torch.from_numpy(np.array([11])),
+# 				torch.from_numpy(np.array([3])), torch.from_numpy(np.array([5]))]
+# top_actprobs = [torch.from_numpy(np.array([0.0757])), torch.from_numpy(np.array([0.0798])), torch.from_numpy(np.array([0.0763])),
+# 				torch.from_numpy(np.array([0.0764])), torch.from_numpy(np.array([0.0743]))]
+# relation_label = 4
+# entity_label = [0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+# entity_actions = torch.tensor([1, 3, 3, 3, 3, 3, 4, 4, 2, 2, 2, 2, 2, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 2,
+#         2, 2, 6, 6, 2, 2, 2, 2, 2, 6, 6, 6, 6, 6, 6, 6, 2, 2, 2, 2, 2, 4, 2, 2,
+#         0, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 5, 5, 5, 0, 0, 0, 0, 4, 4])
+# entity_probs = [torch.tensor(-4.2052), torch.tensor(-4.2133), torch.tensor(-4.2154), torch.tensor(-4.2171), torch.tensor(-4.2183), torch.tensor(-4.2192), torch.tensor(-4.2194), torch.tensor(-4.2194), torch.tensor(-4.2189), torch.tensor(-4.2187), torch.tensor(-4.2186), torch.tensor(-4.2186), torch.tensor(-4.2187), torch.tensor(-4.2187), torch.tensor(-4.2186), torch.tensor(-4.2187), torch.tensor(-4.2187), torch.tensor(-4.2188), torch.tensor(-4.2187), torch.tensor(-4.2186), torch.tensor(-4.2186), torch.tensor(-4.2188), torch.tensor(-4.2189), torch.tensor(-4.2191), torch.tensor(-4.2190), torch.tensor(-4.2190), torch.tensor(-4.2188), torch.tensor(-4.2185), torch.tensor(-4.2184), torch.tensor(-4.2182), torch.tensor(-4.2182), torch.tensor(-4.2182), torch.tensor(-4.2183), torch.tensor(-4.2182), torch.tensor(-4.2178), torch.tensor(-4.2177), torch.tensor(-4.2176), torch.tensor(-4.2176), torch.tensor(-4.2179), torch.tensor(-4.2183), torch.tensor(-4.2185), torch.tensor(-4.2185), torch.tensor(-4.2184), torch.tensor(-4.2185), torch.tensor(-4.2188), torch.tensor(-4.2190), torch.tensor(-4.2191), torch.tensor(-4.2192), torch.tensor(-4.2193), torch.tensor(-4.2192), torch.tensor(-4.2189), torch.tensor(-4.2187), torch.tensor(-4.2187), torch.tensor(-4.2188), torch.tensor(-4.2187), torch.tensor(-4.2185), torch.tensor(-4.2183), torch.tensor(-4.2183), torch.tensor(-4.2184), torch.tensor(-4.2185), torch.tensor(-4.2184), torch.tensor(-4.2183), torch.tensor(-4.2183), torch.tensor(-4.2180), torch.tensor(-4.2177), torch.tensor(-4.2175), torch.tensor(-4.2160), torch.tensor(-4.2135)]
+#
+# optimize(RE_actions, top_actprobs, relation_label, entity_label, entity_actions, entity_probs, torch.tensor(-1.2133))
