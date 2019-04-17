@@ -7,7 +7,6 @@ class Parser(object):
 		parser.add_argument('--hidden_dim', type=int, default=600, help="Dimension of hidden layer")
 		parser.add_argument('--state_dim', type=int, default=300, help="Dimension of state")
 		parser.add_argument('--embedding_dim', type=int, default=300, help="Dimension of the word vector of seq-seq model")
-		parser.add_argument('--batchsize', type=int, default=128, help="Batch size on training")
 		parser.add_argument('--pretrain_vec', type=bool, default=True, help="Set to True to use the pre-trained w2v")
 		parser.add_argument('--embedding_size', type=int, default=300, help="Dimension of the word vector")
 
@@ -22,7 +21,10 @@ class Parser(object):
 
 		parser.add_argument('--epochRL', type=int, default=10, help="Number of epoch on training with RL")
 		parser.add_argument('--sampleround', type=int, default=5, help="Sample round in RL")
+
+		# parser.add_argument('--batchsize', type=int, default=28, help="Batch size on training")
 		# parser.add_argument('--datapath', type=str, default='C:/(O_O)!/thesis/5-RE with LSTM/code/HRL-RE-use/data/NYT10_demo/', help="Data directory")
+		parser.add_argument('--batchsize', type=int, default=128, help="Batch size on training")
 		parser.add_argument('--datapath', type=str, default='../NYT10/', help="Data directory")
 
 
