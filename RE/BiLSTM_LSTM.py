@@ -12,7 +12,7 @@ from torch import optim
 import torch.nn.functional as F
 import torch.utils.data as D
 from torch.autograd import Variable
-from TFgirl.RE.general_utils import get_minibatches, padding_sequence
+from general_utils import get_minibatches, padding_sequence
 from torch.nn.utils.rnn import pad_sequence
 import os
 
@@ -33,7 +33,11 @@ class EncoderRNN(nn.Module):
 		self.pretrained = config.pretrain_vec
 		self.dropout = config.dropout
 		if self.pretrained:
-			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
+			if torch.cuda.is_available():
+				self.embedding = nn.Embedding.from_pretrained(torch.cuda.FloatTensor(embedding_pre, device=device), freeze=False)
+			else:
+				self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
+
 		else:
 			self.embedding_size = config.embedding_size + 1
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
@@ -65,7 +69,10 @@ class DecoderRNN(nn.Module):
 		self.dropout = config.dropout
 		self.tag_size = config.entity_tag_size + 1
 		if self.pretrained:
-			self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
+			if torch.cuda.is_available():
+				self.embedding = nn.Embedding.from_pretrained(torch.cuda.FloatTensor(embedding_pre, device=device), freeze=False)
+			else:
+				self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
 		else:
 			self.embedding_size = config.embedding_size + 1
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
@@ -173,7 +180,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 		encoder_optimizer.step()
 		decoder_optimizer.step()
 
-	return loss.item() / float(seq_length), encoder_outputs, decoder_output, decoder_output_tag
+	return loss.item() / float(target_length), encoder_outputs, decoder_output, decoder_output_tag
 
 
 def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.001, l2=0.0001):
