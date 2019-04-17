@@ -10,7 +10,7 @@ import os
 import numpy as np
 from gensim.models import KeyedVectors
 
-from TFgirl.RE import Optimize
+import Optimize
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -32,6 +32,11 @@ class RelationModel(nn.Module):
 		return torch.bmm(H, a)
 
 	def forward(self, encoder_output, decoder_output, noisy_vec_mean, memory, training):
+		if torch.cuda.is_available():
+			encoder_output = encoder_output.cuda()  # Variable(torch.cuda.LongTensor(encoder_output, device=device)).cuda()
+			decoder_output = decoder_output.cuda()  # Variable(torch.cuda.LongTensor(decoder_output, device=device)).cuda()
+			memory = memory.cuda()  # Variable(torch.cuda.LongTensor(memory, device=device)).cuda()
+
 		seq_vec = torch.cat((encoder_output.view(1, -1, self.dim), decoder_output.view(1, -1, self.dim)), 2)
 		sentence_vec = torch.tanh(self.attention(torch.transpose(seq_vec, 1, 2)))  # (1, dim*2, 1)
 
@@ -66,7 +71,7 @@ class RLModel(nn.Module):
 		self.sentence_reward_noisy = [0 for i in range(len(self.sentences))]
 
 		# self.criterion = nn.CrossEntropyLoss()
-		self.att_weight = nn.Parameter(torch.randn(1, 1, self.dim))  # (self.batch, 1, self.hidden_dim)
+		self.att_weight = nn.Parameter(torch.randn(1, 1, self.dim, device=device))  # (self.batch, 1, self.hidden_dim)
 
 	def attention(self, H):  # input: (batch/1, hidden, seq); output: (batch/1, hidden, 1)
 		M = torch.tanh(H)
@@ -106,6 +111,7 @@ class RLModel(nn.Module):
 		RL_RE_loss = []
 		relation_actions_batch, noisy_actions_batch, entity_actions_batch = [], [], []
 		noisy_similarity_batch = []
+		print_loss_total = 0.
 		for sentence_id in range(len(self.sentences)):
 			relation_actions, relation_actprobs, noisy_actions, noisy_actprobs = [], [], [], []
 			# sentence_relations = self.sentences[sentence_id]
@@ -130,13 +136,14 @@ class RLModel(nn.Module):
 			# cal reward of noisy classification ## by using the context based word vec similarity
 			reward_noisy = self.calculate_similarity(train_relation_names[sentence_id], train_sentences_words[sentence_id])
 			self.sentence_reward_noisy[sentence_id] = reward_noisy  # realtion["reward_noisy"] = reward_noisy
-			print("Reward of noisy: " + str(reward_noisy))
 
-			if reward_noisy < 0.3:
+			if reward_noisy < 0.2:
+				print("Reward of noisy: " + str(reward_noisy))
+				sentence_vec = self.attention(torch.transpose(self.encoder_output[sentence_id].view(1, -1, self.dim), 1, 2))
 				if torch.sum(self.noisy_sentences_vec):
-					self.noisy_sentences_vec = torch.cat((self.noisy_sentences_vec, self.encoder_output), 1)  # np.concatenate
+					self.noisy_sentences_vec = torch.cat((self.noisy_sentences_vec, sentence_vec), 0)  # np.concatenate
 				else:
-					self.noisy_sentences_vec = self.attention(torch.transpose(self.encoder_output[sentence_id].view(1, -1, self.dim), 1, 2))
+					self.noisy_sentences_vec = sentence_vec
 				# vector of removed/noisy sentences
 				noisy_vec_mean = torch.mean(self.noisy_sentences_vec, 0, True)
 			# cal reward of relation classification
@@ -156,18 +163,25 @@ class RLModel(nn.Module):
 			if not TEST:
 				loss = Optimize.optimize(relation_actions, relation_actprobs, train_relation_tags[sentence_id],
 								train_entity_tags[sentence_id], entity_actions, entity_probs, seq_loss)
-				print("Reward of jointly RE and RL: " + str(loss))
-				RL_RE_loss.append(loss)
+				# print("Reward of jointly RE and RL: " + str(loss))
+				print_every = 10
+				print_loss_total += loss.item()
+				if sentence_id % print_every == 0:
+					print_loss_avg = print_loss_total / float(print_every)  # *sentence_id//print_every)
+					print_loss_total = 0.
+					print('Jointly RE and RL: (%d %d%%), loss reward: %.4f' % (sentence_id, float(sentence_id) / len(self.sentences) * 100, print_loss_avg))
+				RL_RE_loss.append(loss.item())
 				# optimize
 				# 更新网络
 				self.optimizer.zero_grad()
-				loss.backward()
+				loss.backward(retain_graph=True)
 				self.optimizer.step()
 			if TEST:
 				relation_actions_batch.append(relation_actions)
 				noisy_actions_batch.append(noisy_actions)
 				entity_actions_batch.append(entity_actions)
 				noisy_similarity_batch.append(reward_noisy)
+			torch.cuda.empty_cache()
 		# a batch of sentences
 		if TEST:
 			self.cal_F_score(relation_actions_batch, train_relation_tags, train_entity_tags, entity_actions_batch,
@@ -240,11 +254,12 @@ class RLModel(nn.Module):
 		similarity_value = []
 		for relation_word in relation_words:
 			for word in sentence.split(" "):
-				try:
-					similarity_value.append(self.vec_model.similarity(relation_word, word))
-				except Exception as e:
-					pass
-					print(e)
+				if word != '' and word != ',':
+					try:
+						similarity_value.append(self.vec_model.similarity(relation_word, word))
+					except Exception as e:
+						pass
+						# print(e)
 		if similarity_value:
 			return np.mean(np.array(similarity_value))
 		else:
