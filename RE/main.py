@@ -8,11 +8,11 @@ import torch.nn as nn
 from torch import optim
 from torch.autograd import Variable
 
-from TFgirl.RE import BiLSTM_LSTM
-from TFgirl.RE import Jointly_RL
-from TFgirl.RE.Parser import Parser
+import BiLSTM_LSTM
+import Jointly_RL
+from Parser import Parser
 # from TFgirl.RE.PreProcess.data_manager import DataManager
-from TFgirl.RE.general_utils import padding_sequence, get_minibatches
+from general_utils import padding_sequence, get_minibatches
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -103,13 +103,13 @@ if __name__ == "__main__":
 			seq_loss, encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, target_tensor, encoder,
 						decoder, encoder_optimizer, decoder_optimizer, criterion, args.batchsize)  # , input_length, target_length
 			out_losses.append(seq_loss)
-			print_loss_total += seq_loss
-			# plot_loss_total += loss
-			print_every = 10
-			if (b+1) % print_every == 0:
-				print_loss_avg = print_loss_total / (print_every*b//print_every)
-				print_loss_total = 0
-				print('seq-seq model: (%d %d%%) %.4f' % (b, float(b) / batchcnt * 100, print_loss_avg))
+			# print_loss_total += seq_loss
+			# # plot_loss_total += loss
+			# print_every = 10
+			# if (b+1) % print_every == 0:
+			# 	print_loss_avg = print_loss_total / (print_every*b//print_every)
+			# 	print_loss_total = 0
+			print('seq-seq model: (%d %.2f%%), loss: %.4f' % (b, float(b) / batchcnt * 100, seq_loss))
 
 			RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag, dim, statedim, relation_count,
 										learning_rate, relation_model, args.datapath)
