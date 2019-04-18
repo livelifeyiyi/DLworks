@@ -158,8 +158,10 @@ def calcBotGrad(bot_action, bot_actprob, bot_reward, bot_final_reward, pretrain=
 	bot_tot_reward = [0. for i in range(lenth)]
 	if torch.cuda.is_available():
 		grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0), requires_grad=True)
+		# bot_actprob = torch.cuda.FloatTensor(bot_actprob)
 	else:
 		grads = autograd.Variable(torch.FloatTensor(1, ).fill_(0), requires_grad=True)
+		# bot_actprob = torch.FloatTensor(bot_actprob)
 	j = 0
 	for i in range(lenth):
 		# if top_action[i] > 0:
@@ -190,8 +192,10 @@ def calcTopGrad(top_action, top_actprob, top_reward, top_final_reward, pretrain=
 	decay_reward = top_final_reward
 	if torch.cuda.is_available():
 		grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0), requires_grad=True)
+		# top_actprob = torch.cuda.FloatTensor(top_actprob)
 	else:
 		grads = autograd.Variable(torch.FloatTensor(1, ).fill_(0), requires_grad=True)
+		# top_actprob = torch.FloatTensor(top_actprob)
 	for i in range(lenth)[::-1]:
 		decay_reward = decay_reward * 0.95 + top_reward[i]
 		to_grad = -torch.log(top_actprob[i]).float()
