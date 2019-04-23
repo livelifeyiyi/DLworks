@@ -93,7 +93,7 @@ if __name__ == "__main__":
 		mini_batches = get_minibatches(train_datasets, args.batchsize)
 		batchcnt = len(train_datasets[0]) // args.batchsize  # len(list(mini_batches))
 		for b, data in enumerate(mini_batches):
-			if b == batchcnt:
+			if b >= batchcnt:
 				break
 			sentences, tags, sentences_words, relation_tags, relation_names = data
 
@@ -129,23 +129,25 @@ if __name__ == "__main__":
 			RL_RE_losses.append(RL_RE_loss)
 		np.save("seq2seq_loss_train", out_losses)
 		np.save("RL_RE_loss_train", RL_RE_losses)
-
-		model_name = "./model/model_encoder_epoch%s.pkl" % e
-		torch.save(encoder, model_name)
-		model_name = "./model/model_decoder_epoch%s.pkl" % e
-		torch.save(decoder, model_name)
-		model_name = "./model/relation_model_epoch%s.pkl" % e
-		torch.save(relation_model, model_name)
-		model_name = "./model/RL_model_epoch%s.pkl" % e
-		torch.save(RL_model, model_name)
-		print("Model has been saved")
+		try:
+			model_name = "./model/model_encoder_epoch%s.pkl" % e
+			torch.save(encoder, model_name)
+			model_name = "./model/model_decoder_epoch%s.pkl" % e
+			torch.save(decoder, model_name)
+			model_name = "./model/relation_model_epoch%s.pkl" % e
+			torch.save(relation_model, model_name)
+			model_name = "./model/RL_model_epoch%s.pkl" % e
+			torch.save(RL_model, model_name)
+			print("Model has been saved")
+		except Exception as e:
+			print(e)
 
 		# ********************test data*********************
 		if args.test:
-			mini_batches = get_minibatches(test_datasets, args.batchsize)
-			batchcnt = len(test_datasets[0]) // args.batchsize  # len(list(mini_batches))
+			mini_batches = get_minibatches(test_datasets, args.batchsize_test)
+			batchcnt = len(test_datasets[0]) // args.batchsize_test  # len(list(mini_batches))
 			for b, data in enumerate(mini_batches):
-				if b == batchcnt:
+				if b >= batchcnt:
 					break
 				sentences, tags, sentences_words, relation_tags, relation_names = data
 
@@ -164,7 +166,7 @@ if __name__ == "__main__":
 																								  encoder_optimizer,
 																								  decoder_optimizer,
 																								  criterion,
-																								  args.batchsize, TEST=True)  # , input_length, target_length
+																								  args.batchsize_test, TEST=True)  # , input_length, target_length
 				# out_losses.append(seq_loss)
 				# print_loss_total += seq_loss
 				# plot_loss_total += loss
@@ -172,9 +174,9 @@ if __name__ == "__main__":
 				# if (b + 1) % print_every == 0:
 				# 	print_loss_avg = print_loss_total / (print_every * b // print_every)
 				# 	print_loss_total = 0
-				# 	print('TEST***seq-seq model: (%d %d%%) %.4f' % (b, float(b) / batchcnt * 100, print_loss_avg))
+				print('***TEST***seq-seq model: (%d %.4f%%)' % (b, float(b) / batchcnt * 100))
 
-				RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag, args.batchsize,
+				RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag, args.batchsize_test,
 												dim, statedim, relation_count, learning_rate, relation_model, vec_model)
 				if torch.cuda.is_available():
 					RL_model.cuda()

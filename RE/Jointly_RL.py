@@ -127,19 +127,19 @@ class RLModel(nn.Module):
 				actprob_relation = prob_relation[action_realtion]
 
 				action_noisy = self.sample(prob_noisy, training)
-				actprob_noisy = prob_noisy[action_noisy]
+				# actprob_noisy = prob_noisy[action_noisy]
 
-				relation_actions.append(action_realtion)  # .item()
-				relation_actprobs.append(actprob_relation)
-				noisy_actions.append(action_noisy)
-				noisy_actprobs.append(actprob_noisy)
+				relation_actions.append(action_realtion.item())  # .item()
+				relation_actprobs.append(actprob_relation.item())
+				noisy_actions.append(action_noisy.item())
+				# noisy_actprobs.append(actprob_noisy)
 
 			# cal reward of noisy classification ## by using the context based word vec similarity
 			reward_noisy = self.calculate_similarity(train_relation_names[sentence_id], train_sentences_words[sentence_id])
 			self.sentence_reward_noisy[sentence_id] = reward_noisy  # realtion["reward_noisy"] = reward_noisy
 
 			if reward_noisy < 0.2:
-				print("Reward of noisy: " + str(reward_noisy))
+				# print("Reward of noisy: " + str(reward_noisy))
 				sentence_vec = self.attention(torch.transpose(self.encoder_output[sentence_id].view(1, -1, self.dim), 1, 2))
 				if torch.sum(self.noisy_sentences_vec):
 					self.noisy_sentences_vec = torch.cat((self.noisy_sentences_vec, sentence_vec), 0)  # np.concatenate
@@ -177,41 +177,47 @@ class RLModel(nn.Module):
 				self.optimizer.zero_grad()
 				loss.backward(retain_graph=True)
 				self.optimizer.step()
-			if TEST:
-				relation_actions_batch.append(relation_actions)
-				noisy_actions_batch.append(noisy_actions)
-				entity_actions_batch.append(entity_actions)
-				noisy_similarity_batch.append(reward_noisy)
+			# if TEST:
+			relation_actions_batch.append(relation_actions)
+			noisy_actions_batch.append(noisy_actions)
+			entity_actions_batch.append(entity_actions)
+			noisy_similarity_batch.append(reward_noisy)
 			torch.cuda.empty_cache()
 		# a batch of sentences
+		if not TEST:
+			self.cal_F_score(relation_actions_batch, train_relation_tags, train_relation_names, train_entity_tags, entity_actions_batch,
+							noisy_actions_batch, train_sentences_words, noisy_similarity_batch, "TRAIN")
 		if TEST:
 			self.cal_F_score(relation_actions_batch, train_relation_tags, train_relation_names, train_entity_tags, entity_actions_batch,
-							noisy_actions_batch, train_sentences_words, noisy_similarity_batch)
+							noisy_actions_batch, train_sentences_words, noisy_similarity_batch, "TEST")
+
 		return RL_RE_loss
 
-	def cal_F_score(self, relation_actions_batch, train_relation_tags, train_relation_names,  train_entity_tags, entity_actions_batch, noisy_actions_batch, train_sentences_words, noisy_similarity_batch):
+	def cal_F_score(self, relation_actions_batch, train_relation_tags, train_relation_names,  train_entity_tags, entity_actions_batch, noisy_actions_batch, train_sentences_words, noisy_similarity_batch, flag):
 		batch_size = self.batch_size  # len(relation_actions_batch)
 		round_num = len(relation_actions_batch[0])
 		# cal the P,R and F of relation extraction for a batch of sentences
 		acc_R, cnt_R, tot_R = 0., 0., len(train_relation_tags)
 		rec_R = 0.
 		acc_E, cnt_E, tot_E = 0., 0., 0.  # len(train_entity_tags)
-
+		acc_E_no0 = 0.
 		for sentence_id in range(batch_size):
 			# relation extraction
 			for i in range(round_num):
-				if relation_actions_batch[sentence_id][i] == train_relation_tags[sentence_id]:
+				if int(relation_actions_batch[sentence_id][i]) == train_relation_tags[sentence_id]:
 					acc_R += 1
-				if relation_actions_batch[sentence_id][i] > 0:
+				if int(relation_actions_batch[sentence_id][i]) > 0:
 					cnt_R += 1
 			if train_relation_tags[sentence_id] in relation_actions_batch[sentence_id]:
 				rec_R += 1
 			# entity extraction
 			for word_id in range(len(train_entity_tags[sentence_id])):
-				if entity_actions_batch[sentence_id][word_id] == train_entity_tags[sentence_id][word_id]:
+				if int(entity_actions_batch[sentence_id][word_id]) == train_entity_tags[sentence_id][word_id]:
 					acc_E += 1
-				# if entity_actions_batch[sentence_id][word_id] > 0:
-				cnt_E += 1
+				if train_entity_tags[sentence_id][word_id] > 0:
+					cnt_E += 1
+					if int(entity_actions_batch[sentence_id][word_id]) == train_entity_tags[sentence_id][word_id]:
+						acc_E_no0 += 1
 				tot_E += 1
 			# store the noisy action and sentence in txt file
 			sentence_word = train_sentences_words[sentence_id]
@@ -219,28 +225,38 @@ class RLModel(nn.Module):
 			noisy_reward = noisy_similarity_batch[sentence_id]
 			line = str(noisy_tag) + ",	" + str(noisy_reward) + ",	" + str(train_relation_names[sentence_id]) + ',	' + \
 					str(train_entity_tags[sentence_id]) + ",	" + sentence_word + "\n"
-			with codecs.open("TEST_sentence_noisy_tag.out", mode='a+', encoding='utf-8') as f:
+			with codecs.open(flag+"_sentence_noisy_tag.out", mode='a+', encoding='utf-8') as f:
 				f.write(line)
 
 		precision_R = acc_R/cnt_R
 		# recall = acc/round_num/tot
 		recall_R = rec_R/tot_R
 		beta = 1.
-		F_RE = (1 + beta * beta) * precision_R * recall_R / (beta * beta * precision_R + recall_R)
-		print("******TEST******: Relation precision: " + str(precision_R) + ", recall: " + str(acc_R / round_num / tot_R) + ", "
+		try:
+			F_RE = (1 + beta * beta) * precision_R * recall_R / (beta * beta * precision_R + recall_R)
+		except Exception as e:
+			print(e)
+			F_RE = 0.
+		print("********: Relation precision: " + str(precision_R) + ", recall: " + str(acc_R / round_num / tot_R) + ", "
 				+ str(recall_R) + ", F-score: " + str(F_RE))
 
-		# cal the P,R and F of entity extraction for each sentence
-		precision_E = acc_E / cnt_E
-		recall_E = acc_E / tot_E
-		F_NER = (1 + beta * beta) * precision_E * recall_E / (beta * beta * precision_E + recall_E)
-		print("******TEST******: Entity precision: " + str(precision_E) + ", recall: " + str(recall_E) + ", F-score: " + str(F_NER))
-
-		line_RE = str(precision_R) + ",	" + str(acc_R / round_num / tot_R) + ",	" + str(recall_R) + ",	" + str(F_RE) + '\n'
-		with codecs.open("TEST_RE.out", mode='a+', encoding='utf-8') as f1:
+		line_RE = str(precision_R) + ",	" + str(acc_R / round_num / tot_R) + ",	" + str(recall_R) + ",	" + str(
+			F_RE) + '\n'
+		with codecs.open(flag+"_RE.out", mode='a+', encoding='utf-8') as f1:
 			f1.write(line_RE)
+
+		# cal the P,R and F of entity extraction for each sentence
+		precision_E = acc_E / tot_E
+		recall_E = acc_E_no0 / cnt_E  # acc_E / tot_E
+		try:
+			F_NER = (1 + beta * beta) * precision_E * recall_E / (beta * beta * precision_E + recall_E)
+		except Exception as e:
+			print(e)
+			F_NER = 0.
+		print("********: Entity precision: " + str(precision_E) + ", recall: " + str(recall_E) + ", F-score: " + str(F_NER))
+
 		line_NER = str(precision_E) + ",	" + str(recall_E) + ",	" + str(F_NER) + '\n'
-		with codecs.open("TEST_NER.out", mode='a+', encoding='utf-8') as f2:
+		with codecs.open(flag+"_NER.out", mode='a+', encoding='utf-8') as f2:
 			f2.write(line_NER)
 
 	def calculate_similarity(self, relation_name, sentence):

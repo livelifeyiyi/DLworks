@@ -20,17 +20,16 @@ class Parser(object):
 		parser.add_argument('--test', type=bool, default=True, help="Set to True to inference")
 
 		parser.add_argument('--epochRL', type=int, default=10, help="Number of epoch on training with RL")
-		parser.add_argument('--sampleround', type=int, default=5, help="Sample round in RL")
+		parser.add_argument('--sampleround', type=int, default=5, help="Sample round in RL")  # 50
 
-		# parser.add_argument('--batchsize', type=int, default=28, help="Batch size on training")
-		# parser.add_argument('--datapath', type=str, default='C:/(O_O)!/thesis/5-RE with LSTM/code/HRL-RE-use/data/NYT10_demo/', help="Data directory")
-		parser.add_argument('--batchsize', type=int, default=128, help="Batch size on training")
-		parser.add_argument('--datapath', type=str, default='../NYT10/', help="Data directory")
-
+		parser.add_argument('--batchsize', type=int, default=32, help="Batch size on training")
+		parser.add_argument('--datapath', type=str, default='C:/(O_O)!/thesis/5-RE with LSTM/code/HRL-RE-use/data/NYT10_demo/', help="Data directory")
+		# parser.add_argument('--batchsize', type=int, default=128, help="Batch size on training")
+		# parser.add_argument('--datapath', type=str, default='../NYT10/', help="Data directory")
+		parser.add_argument('--batchsize_test', type=int, default=32, help="Batch size on testing")
 
 		parser.add_argument('--logfile', type=str, default='HRL', help="Filename of log file")
 		parser.add_argument('--epochPRE', type=int, default=15, help="Number of epoch on pretraining")
-		parser.add_argument('--batchsize_test', type=int, default=64, help="Batch size on testing")
 		parser.add_argument('--print_per_batch', type=int, default=200, help="Print results every XXX batches")
 		parser.add_argument('--numprocess', type=int, default=4, help="Number of process")
 		parser.add_argument('--start', type=str, default='', help="Directory to load model")
