@@ -262,7 +262,6 @@ def optimize(RE_actions, top_actprobs, relation_label, entity_label, entity_acti
 	grads = calcTopGrad(RE_actions, top_actprobs, top_reward, top_bias, pretrain=False)  # +=
 	# loss = grads.cpu().data[0]
 	# grads.backward(retain_graph=True)
-
 	#
 	# loss = .0
 	# for i in range(sample_round):
