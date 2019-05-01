@@ -156,35 +156,35 @@ def calcEntityFinalReward(bot_action, gold_labels, bot_bias=0.):
 def calcBotGrad(bot_action, bot_actprob, bot_reward, bot_final_reward, pretrain=False):
 	lenth = len(bot_reward)
 	bot_tot_reward = [0. for i in range(lenth)]
-	if torch.cuda.is_available():
+	'''if torch.cuda.is_available():
 		grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0), requires_grad=True)
 		# bot_actprob = torch.cuda.FloatTensor(bot_actprob)
 	else:
-		grads = autograd.Variable(torch.FloatTensor(1, ).fill_(0), requires_grad=True)
+		grads = autograd.Variable(torch.FloatTensor(1, ).fill_(0), requires_grad=True)'''
 		# bot_actprob = torch.FloatTensor(bot_actprob)
 	j = 0
 	for i in range(lenth):
 		# if top_action[i] > 0:
 			bot_tot_reward[i] = bot_reward[j] / lenth + bot_final_reward[j]  #
 			# for k in range(lenth)[::-1]:
-			tmp = bot_actprob[j]
-			if tmp < 0:
-				tmp = 1 - tmp
-			to_grad = -torch.log(tmp)  # [k]
-			if not pretrain:
-				if torch.cuda.is_available():
-					to_grad = to_grad * autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(bot_tot_reward[i]), requires_grad=True)
-				else:
-					to_grad = to_grad * autograd.Variable(torch.FloatTensor(1, ).fill_(bot_tot_reward[i]), requires_grad=True)
-			if bot_action[j] == 0:  # [k]
-				to_grad *= 0.3
-			elif bot_action[j] == 3 or bot_action[j] == 6:  # [k]
-				to_grad *= 0.7
-			else:
-				to_grad *= 1.0
-			grads = grads + to_grad
+			# tmp = bot_actprob[j]
+			# if tmp < 0:
+			# 	tmp = 1 - tmp
+			# to_grad = -torch.log(tmp)  # [k]
+			# if not pretrain:
+			# 	if torch.cuda.is_available():
+			# 		to_grad = to_grad * autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(bot_tot_reward[i]), requires_grad=True)
+			# 	else:
+			# 		to_grad = to_grad * autograd.Variable(torch.FloatTensor(1, ).fill_(bot_tot_reward[i]), requires_grad=True)
+			# if bot_action[j] == 0:  # [k]
+			# 	to_grad *= 0.3
+			# elif bot_action[j] == 3 or bot_action[j] == 6:  # [k]
+			# 	to_grad *= 0.7
+			# else:
+			# 	to_grad *= 1.0
+			# # grads = grads + to_grad
 			j += 1
-	return bot_tot_reward, grads
+	return bot_tot_reward, 0  # , grads
 
 
 def calcTopGrad(top_action, top_actprob, top_reward, top_final_reward, pretrain=False):
@@ -247,11 +247,10 @@ def optimize(RE_actions, top_actprobs, relation_label, entity_label, entity_acti
 	# grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0))
 
 	# bot_bias, bot_cnt = 0., 0
-	tmp = calcEntityFinalReward(entity_actions, entity_label, 0.)
 	# bot_cnt += len(tmp)
 	# bot_bias += np.sum(tmp)
+	tmp = calcEntityFinalReward(entity_actions, entity_label, 0.)
 	bot_bias = -entity_loss
-
 	bot_reward = calcEntityReward(entity_actions, entity_label)
 	bot_final_reward = [x-bot_bias for x in tmp]
 	# bot_final_reward = calcEntityFinalReward(entity_actions, entity_label, bot_bias)
@@ -260,8 +259,8 @@ def optimize(RE_actions, top_actprobs, relation_label, entity_label, entity_acti
 	for i in range(sample_round):
 		top_reward[i] += bot_tot_reward[0]
 	# if "RE" in mode:
-	grads += calcTopGrad(RE_actions, top_actprobs, top_reward, top_bias, pretrain=False)
-	loss = grads.cpu().data[0]
+	grads = calcTopGrad(RE_actions, top_actprobs, top_reward, top_bias, pretrain=False)  # +=
+	# loss = grads.cpu().data[0]
 	# grads.backward(retain_graph=True)
 
 	#
