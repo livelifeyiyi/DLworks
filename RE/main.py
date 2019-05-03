@@ -39,19 +39,31 @@ if __name__ == "__main__":
 		test_entity_tags = pickle.load(inp)  # entity tags
 		test_relation_tags = pickle.load(inp)  # relation type_id
 		test_relation_names = pickle.load(inp)  # relation name
+	with open(args.datapath + 'data_dev.pkl', 'rb') as inp:
+		dev_sentences_words = pickle.load(inp)  # sentence with words
+		dev_sentences_id = pickle.load(inp)  # sentence with word_ids
+		dev_entity_tags = pickle.load(inp)  # entity tags
+		dev_relation_tags = pickle.load(inp)  # relation type_id
+		dev_relation_names = pickle.load(inp)  # relation name
+
 	# train_data, test_data, dev_data = dm.data['train'], dm.data['test'], dm.data['dev']
 	print("train_data count: ", len(train_sentences_id))
 	print("test_data  count: ", len(test_sentences_id))
+	print("dev_data  count: ", len(dev_sentences_id))
 
 	train_datasets = [train_sentences_id, train_entity_tags, train_sentences_words, train_relation_tags, train_relation_names]
 	test_datasets = [test_sentences_id, test_entity_tags, test_sentences_words, test_relation_tags, test_relation_names]
+	dev_datasets = [dev_sentences_id, dev_entity_tags, dev_sentences_words, dev_relation_tags, dev_relation_names]
 	# print("dev_data   count: ", len(dev_data))
 
 	# if use the pre-trained word vector
 	embedding_pre = args.pretrain_vec  # data['pretrain_vec']
 	dim = args.hidden_dim  # data['hidden_dim']
 	statedim = args.state_dim  # data['state_dim']
-	relation_count = len(set(train_relation_tags))  # args.relation_tag_size  # data['relation_tag_size']
+	tmp = []
+	for j in train_relation_tags:
+		tmp += j
+	relation_count = len(set(tmp))  # args.relation_tag_size  # data['relation_tag_size']
 	noisy_count = args.noisy_tag_size  # ata['noisy_tag_size']
 	learning_rate = args.lr  # data['lr']
 	l2 = args.l2  # data['l2']
@@ -142,6 +154,52 @@ if __name__ == "__main__":
 		except Exception as e:
 			print(e)
 
+		# ********************dev data*********************
+		if args.test:
+			mini_batches = get_minibatches(dev_datasets, args.batchsize_test)
+			batchcnt = len(dev_datasets[0]) // args.batchsize_test  # len(list(mini_batches))
+			for b, data in enumerate(mini_batches):
+				if b >= batchcnt:
+					break
+				sentences, tags, sentences_words, relation_tags, relation_names = data
+
+				input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
+				target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
+				if torch.cuda.is_available():
+					input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
+					target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
+				else:
+					input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
+					target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
+
+				encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor,
+																						target_tensor, encoder,
+																						decoder,
+																						encoder_optimizer,
+																						decoder_optimizer,
+																						criterion,
+																						args.batchsize_test,
+																						TEST=True)  # , input_length, target_length
+				# out_losses.append(seq_loss)
+				# print_loss_total += seq_loss
+				# plot_loss_total += loss
+				# print_every = 10
+				# if (b + 1) % print_every == 0:
+				# 	print_loss_avg = print_loss_total / (print_every * b // print_every)
+				# 	print_loss_total = 0
+				print('***DEV***seq-seq model: (%d %.4f%%)' % (b, float(b) / batchcnt * 100))
+
+				RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
+											  args.batchsize_test,
+											  dim, statedim, relation_count, learning_rate, relation_model,
+											  vec_model)
+				if torch.cuda.is_available():
+					RL_model.cuda()
+
+				# print("Testing RL based RE......")
+				RL_RE_loss = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names,
+									  seq_loss=0, flag="DEV")
+
 		# ********************test data*********************
 		if args.test:
 			mini_batches = get_minibatches(test_datasets, args.batchsize_test)
@@ -182,7 +240,7 @@ if __name__ == "__main__":
 					RL_model.cuda()
 
 				# print("Testing RL based RE......")
-				RL_RE_loss = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names, seq_loss=0, TEST=True)
+				RL_RE_loss = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names, seq_loss=0, flag="TEST")
 				# RL_RE_losses.append(RL_RE_loss)
 			# np.save("seq2seq_loss_test", out_losses)
 			# np.save("RL_RE_loss_test", RL_RE_losses)
