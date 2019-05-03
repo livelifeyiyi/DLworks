@@ -7,7 +7,7 @@ from TFgirl.RE.PreProcess.data_manager import DataManager
 from TFgirl.RE.Parser import Parser
 import sys
 
-ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
+ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT11\\"
 # ROOT_DIR = "C:/(O_O)!/thesis/5-RE with LSTM/code/HRL-RE-use/data/NYT10_demo/"
 
 
@@ -32,11 +32,14 @@ train_relation_names = []  # relation name
 
 print("Processing training data......")
 for data in train_data:
+	relations = []
+	for relation in data["relations"]:
+		relations.append(relation['type'])
 	for relation in data["relations"]:  # if sentence has multiple relations
 		train_sentences_words.append(data["sentext"])
 		train_sentences_id.append(data["text"])
 		train_entity_tags.append(relation['tags'])
-		train_relation_tags.append(relation['type'])
+		train_relation_tags.append(relations)  # (relation['type'])
 		train_relation_names.append(relation['rtext'])
 
 print("Writing training data......")
@@ -55,11 +58,14 @@ test_relation_names = []  # relation name
 
 print("Processing test data......")
 for data in test_data:
+	relations = []
+	for relation in data["relations"]:
+		relations.append(relation['type'])
 	for relation in data["relations"]:  # if sentence has multiple relations
 		test_sentences_words.append(data["sentext"])
 		test_sentences_id.append(data["text"])
 		test_entity_tags.append(relation['tags'])
-		test_relation_tags.append(relation['type'])
+		test_relation_tags.append(relations)
 		test_relation_names.append(relation['rtext'])
 
 print("Writing test data......")
@@ -78,11 +84,14 @@ dev_relation_names = []  # relation name
 
 print("Processing dev data......")
 for data in dev_data:
+	relations = []
+	for relation in data["relations"]:
+		relations.append(relation['type'])
 	for relation in data["relations"]:  # if sentence has multiple relations
 		dev_sentences_words.append(data["sentext"])
 		dev_sentences_id.append(data["text"])
 		dev_entity_tags.append(relation['tags'])
-		dev_relation_tags.append(relation['type'])
+		dev_relation_tags.append(relations)
 		dev_relation_names.append(relation['rtext'])
 
 print("Writing dev data......")
