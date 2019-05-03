@@ -20,7 +20,8 @@ class RelationModel(nn.Module):
 	def __init__(self, dim, statedim, relation_count, noisy_count):
 		super(RelationModel, self).__init__()
 		self.dim = dim
-		self.hid2state = nn.Linear(dim * 3 + statedim, statedim)
+		self.hid2state = nn.Linear(dim * 2 + statedim, statedim)
+		self.hid2state_noisy = nn.Linear(dim * 3 + statedim, statedim)
 		self.state2prob_relation = nn.Linear(statedim, relation_count + 1)
 		self.state2prob_noisy = nn.Linear(statedim, noisy_count)  # + 1
 		self.att_weight = nn.Parameter(torch.randn(1, 1, self.dim*2))  # (self.batch, 1, self.hidden_dim)
@@ -40,11 +41,12 @@ class RelationModel(nn.Module):
 		seq_vec = torch.cat((encoder_output.view(1, -1, self.dim), decoder_output.view(1, -1, self.dim)), 2)
 		sentence_vec = torch.tanh(self.attention(torch.transpose(seq_vec, 1, 2)))  # (1, dim*2, 1)
 
-		inp = torch.cat((sentence_vec.view(-1), noisy_vec_mean.view(-1), memory), 0)  # (2100)
-
+		inp_noisy = torch.cat((sentence_vec.view(-1), noisy_vec_mean.view(-1), memory), 0)  # (2100)
+		inp = torch.cat((sentence_vec.view(-1), memory), 0)  # (2100-300)
 		outp = F.dropout(torch.tanh(self.hid2state(inp)), training=training)
+		outp_noisy = F.dropout(torch.tanh(self.hid2state_noisy(inp_noisy)), training=training)
 		prob_relation = F.softmax(self.state2prob_relation(outp), dim=0)
-		prob_noisy = F.softmax(self.state2prob_noisy(outp), dim=0)
+		prob_noisy = F.softmax(self.state2prob_noisy(outp_noisy), dim=0)
 		return outp, prob_relation, prob_noisy
 
 
@@ -89,7 +91,7 @@ class RLModel(nn.Module):
 			return torch.multinomial(prob, 1)
 
 	# , sentences, encoder_output, decoder_output, decoder_output_prob
-	def forward(self, round_num, train_entity_tags, train_sentences_words, train_relation_tags, train_relation_names, seq_loss, TEST=False):
+	def forward(self, round_num, train_entity_tags, train_sentences_words, train_relation_tags, train_relation_names, seq_loss, flag="TRAIN"):
 		# calculate the probability of each entity tag
 		# decoder_output_prob = self.decoder_softmax(self.decoder_hidden2tag(self.decoder_output))  # (batch, seq, tag_size)
 
@@ -114,6 +116,8 @@ class RLModel(nn.Module):
 		noisy_similarity_batch = []
 		print_loss_total = 0.
 		criterion = nn.NLLLoss()  # CrossEntropyLoss()
+		if torch.cuda.is_available():
+			criterion = criterion.cuda()
 		loss = 0.
 		for sentence_id in range(len(self.sentences)):
 			relation_actions, relation_actprobs, noisy_actions, noisy_actprobs = [], [], [], []
@@ -149,30 +153,31 @@ class RLModel(nn.Module):
 				noisy_actions.append(action_noisy.item())
 				# noisy_actprobs.append(actprob_noisy)
 
+			# cal reward of relation classification
+			# cal total reward of relation classification and entity extraction (decoder_output)
 
-				# cal reward of relation classification
-				# cal total reward of relation classification and entity extraction (decoder_output)
+			if flag == "TRAIN":
+				loss = Optimize.optimize(relation_actions, relation_actprobs, train_relation_tags[sentence_id],
+										 train_entity_tags[sentence_id], entity_actions, entity_probs, seq_loss)  # [action_realtion.item()], [actprob_relation.item()]
+				# print("Reward of jointly RE and RL: " + str(loss))
+				'''print_every = 50
+				print_loss_total += loss.item()
+				if sentence_id % print_every == 0:
+					print_loss_avg = print_loss_total / float(print_every)  # *sentence_id//print_every)
+					print_loss_total = 0.
+					print('Jointly RE and RL: (%d %.2f%%), loss reward: %.4f' % (sentence_id, float(sentence_id) / len(self.sentences) * 100, print_loss_avg))
+				'''
 
-				if not TEST:
-					loss = Optimize.optimize([action_realtion.item()], [actprob_relation.item()], train_relation_tags[sentence_id],
-											 train_entity_tags[sentence_id], entity_actions, entity_probs, seq_loss)
-					# print("Reward of jointly RE and RL: " + str(loss))
-					'''print_every = 50
-					print_loss_total += loss.item()
-					if sentence_id % print_every == 0:
-						print_loss_avg = print_loss_total / float(print_every)  # *sentence_id//print_every)
-						print_loss_total = 0.
-						print('Jointly RE and RL: (%d %.2f%%), loss reward: %.4f' % (sentence_id, float(sentence_id) / len(self.sentences) * 100, print_loss_avg))
-					'''
+				# optimize
 
-					# optimize
-					# for j in range(len(relation_actions)):  # each sentence  # seq_length
-					# 	loss += criterion(relation_actions[j], train_relation_tags[sentence_id])
-					# 更新网络
-					self.optimizer.zero_grad()
-					loss.backward(retain_graph=True)
-					self.optimizer.step()
-			RL_RE_loss.append(loss.item())
+				# loss = criterion(action_realtion.view(1, -1), torch.tensor(train_relation_tags[sentence_id]).view(1, -1))
+				# 更新网络
+				self.optimizer.zero_grad()
+				loss.backward(retain_graph=True)
+				self.optimizer.step()
+			if loss != 0.:
+				RL_RE_loss.append(loss.item())
+
 			# cal reward of noisy classification ## by using the context based word vec similarity
 			reward_noisy = self.calculate_similarity(train_relation_names[sentence_id], train_sentences_words[sentence_id])
 			self.sentence_reward_noisy[sentence_id] = reward_noisy  # realtion["reward_noisy"] = reward_noisy
@@ -196,37 +201,70 @@ class RLModel(nn.Module):
 			torch.cuda.empty_cache()
 		print("Reward of jointly RE and RL: " + str(np.average(np.array(RL_RE_loss))))
 		# a batch of sentences
-		if not TEST:
-			self.cal_F_score(relation_actions_batch, train_relation_tags, train_relation_names, train_entity_tags, entity_actions_batch,
-							noisy_actions_batch, train_sentences_words, noisy_similarity_batch, "TRAIN")
-		if TEST:
-			self.cal_F_score(relation_actions_batch, train_relation_tags, train_relation_names, train_entity_tags, entity_actions_batch,
-							noisy_actions_batch, train_sentences_words, noisy_similarity_batch, "TEST")
+
+		self.cal_F_score(relation_actions_batch, train_relation_tags, train_relation_names, train_entity_tags, entity_actions_batch,
+							noisy_actions_batch, train_sentences_words, noisy_similarity_batch, flag)
 
 		return RL_RE_loss
+
+
+	def calc_acc_total(self, relation_action, entity_action, relation_labels, entity_labels):
+		acc, cnt, tot = 0, 0, len(relation_labels)
+		used = [0 for i in range(len(relation_action))]
+		for label in relation_labels:
+			# tp, tags = label, label['tags']
+			j, ok = 0, 0
+			for i in range(len(relation_action)):  # each round
+				if relation_action[i] == label and label > 0 and used[i] == 0 and ok == 0:
+					match = 1
+					for k in range(len(entity_labels)):
+						if entity_labels[k] == 4 and entity_action[k] != 4:
+							match = 0
+						if entity_labels[k] != 4 and entity_action[k] == 4:
+							match = 0
+						if entity_labels[k] == 5 and entity_action[k] != 5:
+							match = 0
+						if entity_labels[k] != 5 and entity_action[k] == 5:
+							match = 0
+					if match == 1:
+						ok = 1
+						used[i] = 1
+				if relation_action[i] > 0:
+					# j += 1
+					cnt += 1
+			acc += ok
+		cnt //= tot
+		return acc, tot, cnt
 
 	def cal_F_score(self, relation_actions_batch, train_relation_tags, train_relation_names,  train_entity_tags, entity_actions_batch, noisy_actions_batch, train_sentences_words, noisy_similarity_batch, flag):
 		batch_size = self.batch_size  # len(relation_actions_batch)
 		round_num = len(relation_actions_batch[0])
 		# cal the P,R and F of relation extraction for a batch of sentences
+		acc_total, tot_total, cnt_total = 0., 0., 0.
 		acc_R, cnt_R, tot_R = 0., 0., len(train_relation_tags)
 		acc_R_last, cnt_R_last = 0., 0.
 		rec_R = 0.
 		acc_E, cnt_E, tot_E = 0., 0., 0.  # len(train_entity_tags)
 		acc_E_no0 = 0.
 		for sentence_id in range(batch_size):
+			acc1, tot1, cnt1 = self.calc_acc_total(relation_actions_batch[sentence_id], entity_actions_batch[sentence_id],
+								train_relation_tags[sentence_id], train_entity_tags[sentence_id])
+			acc_total += acc1
+			tot_total += tot1
+			cnt_total += cnt1
 			# relation extraction
-			if int(relation_actions_batch[sentence_id][-1]) == train_relation_tags[sentence_id]:
+			if int(relation_actions_batch[sentence_id][-1]) in train_relation_tags[sentence_id]:
 				acc_R_last += 1
 			if int(relation_actions_batch[sentence_id][-1]) > 0:
 				cnt_R_last += 1
 			for i in range(round_num):
-				if int(relation_actions_batch[sentence_id][i]) == train_relation_tags[sentence_id]:
+				if int(relation_actions_batch[sentence_id][i]) in train_relation_tags[sentence_id]:
 					acc_R += 1
 				if int(relation_actions_batch[sentence_id][i]) > 0:
 					cnt_R += 1
-			if train_relation_tags[sentence_id] in relation_actions_batch[sentence_id]:
-				rec_R += 1
+			for each_relation in train_relation_tags[sentence_id]:
+				if each_relation in relation_actions_batch[sentence_id]:
+					rec_R += 1
 			# entity extraction
 			for word_id in range(len(train_entity_tags[sentence_id])):
 				if int(entity_actions_batch[sentence_id][word_id]) == train_entity_tags[sentence_id][word_id]:
@@ -244,6 +282,19 @@ class RLModel(nn.Module):
 					str(train_entity_tags[sentence_id]) + ",	" + sentence_word + "\n"
 			with codecs.open(flag+"_sentence_noisy_tag.out", mode='a+', encoding='utf-8') as f:
 				f.write(line)
+
+		precision_total = acc_total / cnt_total
+		recall_total = acc_total / tot_total
+		beta = 1.
+		try:
+			F_total = (1 + beta * beta) * precision_total * recall_total / (beta * beta * precision_total + recall_total)
+		except Exception as e:
+			print(e)
+			F_total = 0.
+		print("********: TOTAL precision: " + str(precision_total) + ", recall: " + str(recall_total) + ", F-score: " + str(F_total))
+		line_total = str(precision_total) + ", " + str(recall_total) + ", " + str(F_total) + "\n"
+		with codecs.open(flag+"_TOTAL.out", mode='a+', encoding='utf-8') as f1:
+			f1.write(line_total)
 
 		precision_R = acc_R/cnt_R
 		# recall = acc/round_num/tot
