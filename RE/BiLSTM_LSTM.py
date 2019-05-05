@@ -44,12 +44,13 @@ class EncoderRNN(nn.Module):
 		# self.embedding = nn.Embedding(input_size, hidden_size)
 		self.bilstm = nn.LSTM(input_size=self.embedding_dim, hidden_size=self.hidden_dim // 2, num_layers=2, bidirectional=True, batch_first=True, dropout=self.dropout)
 
-	def forward(self, input, hidden):
+	def forward(self, input, pos_tensor, hidden):
 		embedded = self.embedding(input)
+		embedded_pos = torch.mul(embedded, pos_tensor.view(self.batch, -1, 1))
 		# embedded = embedded.view(-1, self.batch, self.embedding_dim)  # .view(1, 1, -1)
 		# x_t dim:(seq, batch, feature)
 		# embedded = torch.transpose(embedded, 0, 1)
-		output, hidden = self.bilstm(embedded, hidden)
+		output, hidden = self.bilstm(embedded_pos, hidden)
 		return output, hidden
 
 	def initHidden_bilstm(self):
@@ -111,7 +112,7 @@ def timeSince(since, percent):
 teacher_forcing_ratio = 0.5
 
 
-def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, BATCH, TEST=False):  # max_length=MAX_LENGTH
+def train(input_tensor, pos_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, BATCH, TEST=False):  # max_length=MAX_LENGTH
 	encoder_hidden = encoder.initHidden_bilstm()
 
 	encoder_optimizer.zero_grad()
@@ -129,7 +130,7 @@ def train(input_tensor, target_tensor, encoder, decoder, encoder_optimizer, deco
 	# 	encoder_outputs[ei] = encoder_output[0, 0]
 
 	# input batch
-	encoder_outputs, encoder_hidden = encoder(input_tensor, encoder_hidden)
+	encoder_outputs, encoder_hidden = encoder(input_tensor, pos_tensor, encoder_hidden)
 	# input_tensor: (batch, seq); encoder_hidden: (layer*direction, batch, hidden_dim//2)
 	# encoder_outputs: (batch, seq, hidden_dim//2*2); encoder_hidden: (layer*direction, batch, hidden_dim//2)
 
