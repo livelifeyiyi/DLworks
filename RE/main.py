@@ -30,18 +30,23 @@ if __name__ == "__main__":
 	with open(args.datapath+'data_train.pkl', 'rb') as inp:
 		train_sentences_words = pickle.load(inp)  # sentence with words
 		train_sentences_id = pickle.load(inp)  # sentence with word_ids
+		train_position_lambda = pickle.load(inp)  # position lambda
 		train_entity_tags = pickle.load(inp)  # entity tags
 		train_relation_tags = pickle.load(inp)  # relation type_id
 		train_relation_names = pickle.load(inp)  # relation name
+
 	with open(args.datapath+'data_test.pkl', 'rb') as inp:
 		test_sentences_words = pickle.load(inp)  # sentence with words
 		test_sentences_id = pickle.load(inp)  # sentence with word_ids
+		test_position_lambda = pickle.load(inp)  # position lambda
 		test_entity_tags = pickle.load(inp)  # entity tags
 		test_relation_tags = pickle.load(inp)  # relation type_id
 		test_relation_names = pickle.load(inp)  # relation name
+
 	with open(args.datapath + 'data_dev.pkl', 'rb') as inp:
 		dev_sentences_words = pickle.load(inp)  # sentence with words
 		dev_sentences_id = pickle.load(inp)  # sentence with word_ids
+		dev_position_lambda = pickle.load(inp)  # position lambda
 		dev_entity_tags = pickle.load(inp)  # entity tags
 		dev_relation_tags = pickle.load(inp)  # relation type_id
 		dev_relation_names = pickle.load(inp)  # relation name
@@ -51,9 +56,9 @@ if __name__ == "__main__":
 	print("test_data  count: ", len(test_sentences_id))
 	print("dev_data  count: ", len(dev_sentences_id))
 
-	train_datasets = [train_sentences_id, train_entity_tags, train_sentences_words, train_relation_tags, train_relation_names]
-	test_datasets = [test_sentences_id, test_entity_tags, test_sentences_words, test_relation_tags, test_relation_names]
-	dev_datasets = [dev_sentences_id, dev_entity_tags, dev_sentences_words, dev_relation_tags, dev_relation_names]
+	train_datasets = [train_sentences_id, train_position_lambda, train_entity_tags, train_sentences_words, train_relation_tags, train_relation_names]
+	test_datasets = [test_sentences_id, test_position_lambda, test_entity_tags, test_sentences_words, test_relation_tags, test_relation_names]
+	dev_datasets = [dev_sentences_id, dev_position_lambda, dev_entity_tags, dev_sentences_words, dev_relation_tags, dev_relation_names]
 	# print("dev_data   count: ", len(dev_data))
 
 	# if use the pre-trained word vector
@@ -85,6 +90,7 @@ if __name__ == "__main__":
 		# RL_model.cuda()
 	out_losses = []
 	RL_RE_losses = []
+	RE_rewardsall = []
 	print_loss_total = 0  # Reset every print_every
 	# plot_loss_total = 0  # Reset every plot_every
 
@@ -107,18 +113,21 @@ if __name__ == "__main__":
 		for b, data in enumerate(mini_batches):
 			if b >= batchcnt:
 				break
-			sentences, tags, sentences_words, relation_tags, relation_names = data
-
+			sentences, pos_lambda, tags, sentences_words, relation_tags, relation_names = data
 			input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
+			pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=0)
 			target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
 			if torch.cuda.is_available():
 				input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 				target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
+				pos_tensor = Variable(torch.cuda.FloatTensor(pos_tensor, device=device)).cuda()
 			else:
 				input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
 				target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
+				pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
 
-			seq_loss, encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, target_tensor, encoder,
+
+			seq_loss, encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, pos_tensor, target_tensor, encoder,
 						decoder, encoder_optimizer, decoder_optimizer, criterion, args.batchsize)  # , input_length, target_length
 			out_losses.append(seq_loss)
 			# print_loss_total += seq_loss
@@ -137,10 +146,12 @@ if __name__ == "__main__":
 			# sentences, encoder_output, decoder_output, decoder_output_prob, round_num, train_entity_tags,
 			# train_sentences_words, train_relation_tags, train_relation_names, seq_loss, TEST=False
 			# input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
-			RL_RE_loss = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names, seq_loss)
+			RL_RE_loss, RE_rewards = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names, seq_loss)
 			RL_RE_losses.append(RL_RE_loss)
+			RE_rewardsall.append(RE_rewards)
 		np.save("seq2seq_loss_train", out_losses)
 		np.save("RL_RE_loss_train", RL_RE_losses)
+		np.save("RE_rewards_train", RE_rewardsall)
 		try:
 			model_name = "./model/model_encoder_epoch%s.pkl" % e
 			torch.save(encoder, model_name)
@@ -161,18 +172,21 @@ if __name__ == "__main__":
 			for b, data in enumerate(mini_batches):
 				if b >= batchcnt:
 					break
-				sentences, tags, sentences_words, relation_tags, relation_names = data
+				sentences, pos_lambda, tags, sentences_words, relation_tags, relation_names = data
 
 				input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
+				pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=args.embedding_size)
 				target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
 				if torch.cuda.is_available():
 					input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 					target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
+					pos_tensor = Variable(torch.cuda.FloatTensor(pos_tensor, device=device)).cuda()
 				else:
 					input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
 					target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
+					pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
 
-				encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor,
+				encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, pos_tensor,
 																						target_tensor, encoder,
 																						decoder,
 																						encoder_optimizer,
@@ -207,18 +221,21 @@ if __name__ == "__main__":
 			for b, data in enumerate(mini_batches):
 				if b >= batchcnt:
 					break
-				sentences, tags, sentences_words, relation_tags, relation_names = data
+				sentences, pos_lambda, tags, sentences_words, relation_tags, relation_names = data
 
 				input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
+				pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=args.embedding_size)
 				target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
 				if torch.cuda.is_available():
 					input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 					target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
+					pos_tensor = Variable(torch.cuda.FloatTensor(pos_tensor, device=device)).cuda()
 				else:
 					input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
 					target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
+					pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
 
-				encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor,
+				encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, pos_tensor,
 																								  target_tensor, encoder,
 																								  decoder,
 																								  encoder_optimizer,
