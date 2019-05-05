@@ -10,7 +10,8 @@ import os
 import numpy as np
 
 
-import Optimize
+from Optimize import Optimize
+Optimize = Optimize()
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -112,22 +113,27 @@ class RLModel(nn.Module):
 		# 	else:
 		# 		noisy_vec_mean = Variable(torch.FloatTensor(self.dim, ).fill_(0))
 		RL_RE_loss = []
+		RE_rewards = []
 		relation_actions_batch, noisy_actions_batch, entity_actions_batch = [], [], []
 		noisy_similarity_batch = []
 		print_loss_total = 0.
-		criterion = nn.NLLLoss()  # CrossEntropyLoss()
-		if torch.cuda.is_available():
-			criterion = criterion.cuda()
-		loss = 0.
+		# criterion = nn.NLLLoss()  # CrossEntropyLoss()
+		# if torch.cuda.is_available():
+		# 	criterion = criterion.cuda()
+		loss_RL = 0.
 		for sentence_id in range(len(self.sentences)):
 			relation_actions, relation_actprobs, noisy_actions, noisy_actprobs = [], [], [], []
 
-			entity_actions, entity_probs = [], []
+			# entity_actions = []
 			entity_actions = self.sample(self.decoder_output_prob[sentence_id], False)
-			idx = 0
-			for tag in entity_actions:
-				entity_probs.append(self.decoder_output_prob[sentence_id][idx][tag])
-				idx += 1
+			#  ######
+			#  entity_probs = []
+			# idx = 0
+			# for tag in entity_actions:
+			# 	entity_probs.append(self.decoder_output_prob[sentence_id][idx][tag])
+			# 	idx += 1
+			#  ######
+
 			# for i in range(len(decoder_output_prob[sentence_id])):  # each word
 			# 	entity_tag = self.sample(decoder_output_prob[sentence_id][i], False)
 			# 	entity_prob = decoder_output_prob[sentence_id][i][entity_tag]
@@ -153,30 +159,40 @@ class RLModel(nn.Module):
 				noisy_actions.append(action_noisy.item())
 				# noisy_actprobs.append(actprob_noisy)
 
+			if flag == "TRAIN":
+				# loss_RL = Optimize.optimize(relation_actions, relation_actprobs, train_relation_tags[sentence_id], seq_loss)
+				loss_RL, relation_reward = Optimize.optimize_each(relation_actions, relation_actprobs, train_relation_tags[sentence_id], train_entity_tags[sentence_id], entity_actions)
+				self.optimizer.zero_grad()
+				loss_RL.backward(retain_graph=True)
+				self.optimizer.step()
+			if loss_RL != 0.:
+				RL_RE_loss.append(loss_RL.item())
+				RE_rewards.append(relation_reward)
+
 			# cal reward of relation classification
 			# cal total reward of relation classification and entity extraction (decoder_output)
 
-			if flag == "TRAIN":
-				loss = Optimize.optimize(relation_actions, relation_actprobs, train_relation_tags[sentence_id],
-										 train_entity_tags[sentence_id], entity_actions, entity_probs, seq_loss)  # [action_realtion.item()], [actprob_relation.item()]
+			'''if flag == "TRAIN":
+				loss_RL = Optimize.optimize(relation_actions, relation_actprobs, train_relation_tags[sentence_id], seq_loss)
+				# train_entity_tags[sentence_id], entity_actions, entity_probs,   [action_realtion.item()], [actprob_relation.item()]
 				# print("Reward of jointly RE and RL: " + str(loss))
-				'''print_every = 50
-				print_loss_total += loss.item()
-				if sentence_id % print_every == 0:
-					print_loss_avg = print_loss_total / float(print_every)  # *sentence_id//print_every)
-					print_loss_total = 0.
-					print('Jointly RE and RL: (%d %.2f%%), loss reward: %.4f' % (sentence_id, float(sentence_id) / len(self.sentences) * 100, print_loss_avg))
-				'''
+				# print_every = 50
+				# print_loss_total += loss.item()
+				# if sentence_id % print_every == 0:
+				# 	print_loss_avg = print_loss_total / float(print_every)  # *sentence_id//print_every)
+				# 	print_loss_total = 0.
+				# 	print('Jointly RE and RL: (%d %.2f%%), loss reward: %.4f' % (sentence_id, float(sentence_id) / len(self.sentences) * 100, print_loss_avg))
+				# 
 
 				# optimize
 
 				# loss = criterion(action_realtion.view(1, -1), torch.tensor(train_relation_tags[sentence_id]).view(1, -1))
 				# 更新网络
 				self.optimizer.zero_grad()
-				loss.backward(retain_graph=True)
+				loss_RL.backward(retain_graph=True)
 				self.optimizer.step()
-			if loss != 0.:
-				RL_RE_loss.append(loss.item())
+			if loss_RL != 0.:
+				RL_RE_loss.append(loss_RL.item())'''
 
 			# cal reward of noisy classification ## by using the context based word vec similarity
 			reward_noisy = self.calculate_similarity(train_relation_names[sentence_id], train_sentences_words[sentence_id])
@@ -205,7 +221,7 @@ class RLModel(nn.Module):
 		self.cal_F_score(relation_actions_batch, train_relation_tags, train_relation_names, train_entity_tags, entity_actions_batch,
 							noisy_actions_batch, train_sentences_words, noisy_similarity_batch, flag)
 
-		return RL_RE_loss
+		return RL_RE_loss, RE_rewards
 
 
 	def calc_acc_total(self, relation_action, entity_action, relation_labels, entity_labels):
