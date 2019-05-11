@@ -146,15 +146,17 @@ class RE_RNN(nn.Module):
 				torch.randn(1, 1, self.statedim, device=device))
 
 	def forward(self, encoder_output, hidden):
-		if torch.cuda.is_available():
-			encoder_output = encoder_output.cuda()  # Variable(torch.cuda.LongTensor(encoder_output, device=device)).cuda()
-
+		# if torch.cuda.is_available():
+		# 	encoder_output = encoder_output.cuda()  # Variable(torch.cuda.LongTensor(encoder_output, device=device)).cuda()
+		# 	hidden = hidden.cuda()
 		output = F.relu(encoder_output)
 		lstm_out, hidden = self.lstm(output, hidden)
 		lstm_out = self.dropout_lstm(lstm_out)
-		att_out = torch.tanh(self.attention(lstm_out.view(self.batch, self.hidden_dim, -1)))
+		att_out = torch.tanh(self.attention(lstm_out.contiguous().view(self.batch, self.hidden_dim, -1)))
 		# att_out = self.dropout_att(att_out)
 		relation = torch.tensor([i for i in range(self.tag_size)], dtype=torch.long).repeat(self.batch, 1)
+		if torch.cuda.is_available():
+			relation = relation.cuda()
 		relation = self.relation_embeds(relation)
 		res = torch.add(torch.bmm(relation, att_out), self.relation_bias)
 		res = F.softmax(res, 1)
@@ -255,7 +257,7 @@ def train(input_tensor, pos_tensor, target_tensor, RE_target, encoder, decoder, 
 					break
 		'''
 		loss.backward(retain_graph=True)
-		loss_RE.backward(retain_graph=True)
+		loss_RE.backward()
 
 		encoder_optimizer.step()
 		decoder_optimizer.step()

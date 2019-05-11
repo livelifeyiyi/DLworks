@@ -13,7 +13,7 @@ from gensim.models import KeyedVectors
 
 from Parser import Parser
 # from TFgirl.RE.PreProcess.data_manager import DataManager
-from general_utils import padding_sequence, get_minibatches
+from general_utils import padding_sequence, get_minibatches, padding_sequence_recurr
 import model
 
 
@@ -54,6 +54,7 @@ class evaluate():
 			if relation_action > 0:
 				cnt += 1
 				self.acc += ok
+			self.cnt += cnt
 		else:
 			for label in relation_labels:
 				if label in relation_action and ok == 0 and label > 0:  # relation_action[i] == label and used[i] == 0
@@ -76,7 +77,7 @@ class evaluate():
 					# j += 1
 					cnt += 1
 					self.acc += ok
-		self.cnt += cnt // len(relation_labels)
+			self.cnt += cnt // len(relation_labels)
 		return self.acc, self.tot, self.cnt
 
 	def cal_F_score(self, relation_actions_batch, train_relation_tags, train_entity_tags, entity_actions_batch, flag):
@@ -90,34 +91,38 @@ class evaluate():
 		rec_R = 0.
 		acc_E, cnt_E, tot_E = 0., 0., 0.  # len(train_entity_tags)
 		acc_E_no0 = 0.
+
 		for sentence_id in range(batch_size):
+			relation_tag = list(set(train_relation_tags[sentence_id]))
 			if isinstance(relation_actions_batch[sentence_id], np.int64):
 				round_num = 1
 			else:
 				round_num = len(relation_actions_batch[sentence_id])
 			acc_total, tot_total, cnt_total = self.calc_acc_total(relation_actions_batch[sentence_id],
 																  entity_actions_batch[sentence_id],
-																  train_relation_tags[sentence_id],
+																  relation_tag,
 																  train_entity_tags[sentence_id])
 
 			if round_num > 1:
 				for i in range(round_num):
-					if int(relation_actions_batch[sentence_id][i]) in train_relation_tags[sentence_id]:
+					if int(relation_actions_batch[sentence_id][i]) in relation_tag:
 						acc_R += 1
 					if int(relation_actions_batch[sentence_id][i]) > 0:
 						cnt_R += 1
-					tot_R += 1
+					# tot_R += 1
+				cnt_R_last += round_num // len(relation_tag)
 			else:
-				if relation_actions_batch[sentence_id] in train_relation_tags[sentence_id]:
+				if relation_actions_batch[sentence_id] in relation_tag:
 					acc_R += 1
 				if relation_actions_batch[sentence_id] > 0:
 					cnt_R += 1
+				cnt_R_last += round_num
 
-			tot_R_relation_num += len(train_relation_tags[sentence_id])
-			cnt_R_last += round_num // len(train_relation_tags[sentence_id])
-			for each_relation in train_relation_tags[sentence_id]:
+			tot_R_relation_num += len(relation_tag)
+			# cnt_R_last += round_num  # // len(relation_tag)
+			for each_relation in relation_tag:
 				if each_relation > 0:
-					tot_R += 1
+					# tot_R += 1
 					if isinstance(relation_actions_batch[sentence_id], np.int64):
 						if each_relation == relation_actions_batch[sentence_id]:
 							rec_R += 1
@@ -148,22 +153,25 @@ class evaluate():
 		with codecs.open("./" + flag + "_TOTAL.out", mode='a+', encoding='utf-8') as f1:
 			f1.write(line_total)
 
-		precision_R = acc_R / cnt_R
-		# recall = acc/round_num/tot
-		recall_R = rec_R / tot_R
+		if cnt_R != 0 and tot_R_relation_num != 0:
+			precision_R = acc_R / cnt_R
+			# recall = acc/round_num/tot
+			recall_R = rec_R / tot_R_relation_num
+		else:
+			precision_R = 0
+			recall_R = 0
 		beta = 1.
 		try:
 			F_RE = (1 + beta * beta) * precision_R * recall_R / (beta * beta * precision_R + recall_R)
 		except Exception as e:
-			print(e)
+			# print(e)
 			F_RE = 0.
 		print("********: Relation precision: " + str(acc_R / tot_R_relation_num) + ", " + str(
 			acc_R / cnt_R_last) + ", " + str(precision_R) +
-			  ", recall: " + str(rec_R / tot_R_relation_num) + ", " + str(recall_R) + ", F-score: " + str(F_RE))
+			  ", recall: " + str(recall_R) + ", F-score: " + str(F_RE))
 
 		line_RE = str(acc_R / tot_R_relation_num) + ", " + str(acc_R / cnt_R_last) + ", " + str(
-			precision_R) + ",	" + str(rec_R / tot_R_relation_num) + ",	" + str(recall_R) \
-				  + ",	" + str(F_RE) + '\n'
+			precision_R) + ",	" + str(recall_R) + ",	" + str(F_RE) + '\n'
 		with codecs.open("./" + flag + "_RE.out", mode='a+', encoding='utf-8') as f1:
 			f1.write(line_RE)
 
@@ -282,7 +290,7 @@ if __name__ == "__main__":
 			input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
 			pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=0)
 			target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
-			relation_target_tensor, relation_length = padding_sequence(relation_tags, pad_token=0)
+			relation_target_tensor = padding_sequence_recurr(relation_tags)
 			if torch.cuda.is_available():
 				input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 				target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
@@ -294,7 +302,8 @@ if __name__ == "__main__":
 				pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
 				relation_target_tensor = Variable(torch.LongTensor(relation_target_tensor, device=device))
 
-			loss_NER, loss_RE, NER_output, RE_output = model.train(input_tensor, pos_tensor, target_tensor, relation_target_tensor, encoder, decoder, RE_model,
+			loss_NER, loss_RE, NER_output, RE_output = model.train(input_tensor, pos_tensor, target_tensor, relation_target_tensor,
+					encoder, decoder, RE_model,
 					encoder_optimizer, decoder_optimizer, RE_optimizer,
 					criterion, args.batchsize, TEST=False)
 
@@ -303,8 +312,99 @@ if __name__ == "__main__":
 
 			# out_losses.append(loss_NER)
 			entity_actions = torch.max(NER_output, 2)[1]  # evaluate.sample(NER_output, False)
-			action_realtion = torch.max(RE_output, 1)[1]  # evaluate.sample(RE_output, False)
+			action_realtion = torch.multinomial(RE_output, 1)  # torch.max(RE_output, 1)[1]  # evaluate.sample(RE_output, False)
 
-			evaluate.cal_F_score(np.array(action_realtion), relation_tags, tags, np.array(entity_actions), flag="TRAIN")
+			evaluate.cal_F_score(np.array(action_realtion.cpu()), relation_tags, tags, np.array(entity_actions.cpu()), flag="TRAIN")
 
+		if e % 10 == 0 or e == args.epochRL-1:
+			try:
+				model_name = "./model/model_encoder_epoch%s.pkl" % e
+				torch.save(encoder, model_name)
+				model_name = "./model/model_decoder_epoch%s.pkl" % e
+				torch.save(decoder, model_name)
+				model_name = "./model/relation_model_epoch%s.pkl" % e
+				torch.save(RE_model, model_name)
+				print("Model has been saved")
+			except Exception as e:
+				print(e)
+		# ********************dev data*********************
+		if args.test:
+			mini_batches = get_minibatches(dev_datasets, args.batchsize)
+			batchcnt = len(dev_datasets[0]) // args.batchsize  # len(list(mini_batches))
+			for b, data in enumerate(mini_batches):
+				if b >= batchcnt:
+					break
+				sentences, pos_lambda, tags, sentences_words, relation_tags, relation_names = data
 
+				input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
+				pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=0)
+				target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
+				relation_target_tensor = padding_sequence_recurr(relation_tags)
+				if torch.cuda.is_available():
+					input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
+					target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
+					pos_tensor = Variable(torch.cuda.FloatTensor(pos_tensor, device=device)).cuda()
+					relation_target_tensor = Variable(torch.cuda.LongTensor(relation_target_tensor, device=device)).cuda()
+				else:
+					input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
+					target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
+					pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
+					relation_target_tensor = Variable(torch.LongTensor(relation_target_tensor, device=device))
+
+				NER_output, RE_output = model.train(input_tensor, pos_tensor, target_tensor,
+																	   relation_target_tensor,
+																	   encoder, decoder, RE_model,
+																	   encoder_optimizer, decoder_optimizer, RE_optimizer,
+																	   criterion, args.batchsize, TEST=True)
+
+				print('*****DEV*****seq-seq model: (%d %.2f%%)' % (b, float(b) / batchcnt * 100))
+
+				# out_losses.append(loss_NER)
+				entity_actions = torch.max(NER_output, 2)[1]  # evaluate.sample(NER_output, False)
+				action_realtion = torch.multinomial(RE_output, 1)  # torch.max(RE_output, 1)[1]  # evaluate.sample(RE_output, False)
+
+				evaluate.cal_F_score(np.array(action_realtion.cpu()), relation_tags, tags, np.array(entity_actions.cpu()),
+									 flag="DEV")
+
+		# ********************test data*********************
+		if args.test:
+			mini_batches = get_minibatches(test_datasets, args.batchsize)
+			batchcnt = len(test_datasets[0]) // args.batchsize  # len(list(mini_batches))
+			for b, data in enumerate(mini_batches):
+				if b >= batchcnt:
+					break
+				sentences, pos_lambda, tags, sentences_words, relation_tags, relation_names = data
+
+				input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
+				pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=0)
+				target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
+				relation_target_tensor = padding_sequence_recurr(relation_tags)
+				if torch.cuda.is_available():
+					input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
+					target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
+					pos_tensor = Variable(torch.cuda.FloatTensor(pos_tensor, device=device)).cuda()
+					relation_target_tensor = Variable(
+						torch.cuda.LongTensor(relation_target_tensor, device=device)).cuda()
+				else:
+					input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
+					target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
+					pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
+					relation_target_tensor = Variable(torch.LongTensor(relation_target_tensor, device=device))
+
+				NER_output, RE_output = model.train(input_tensor, pos_tensor, target_tensor,
+																	   relation_target_tensor,
+																	   encoder, decoder, RE_model,
+																	   encoder_optimizer, decoder_optimizer,
+																	   RE_optimizer,
+																	   criterion, args.batchsize, TEST=True)
+
+				print('*****TEST*****seq-seq model: (%d %.2f%%)' % (b, float(b) / batchcnt * 100))
+
+				# out_losses.append(loss_NER)
+				entity_actions = torch.max(NER_output, 2)[1]  # evaluate.sample(NER_output, False)
+				action_realtion = torch.multinomial(RE_output,
+													1)  # torch.max(RE_output, 1)[1]  # evaluate.sample(RE_output, False)
+
+				evaluate.cal_F_score(np.array(action_realtion.cpu()), relation_tags, tags,
+									 np.array(entity_actions.cpu()),
+									 flag="TEST")
