@@ -7,8 +7,8 @@ from TFgirl.RE.PreProcess.data_manager import DataManager
 from TFgirl.RE.Parser import Parser
 import sys
 
-# ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT11\\"
-ROOT_DIR = "C:/(O_O)!/thesis/5-RE with LSTM/code/HRL-RE-use/data/NYT10_demo/"
+ROOT_DIR = "E:\\newFolder\\data\\entity&relation_dataset\\NYT10\\"
+# ROOT_DIR = "C:/(O_O)!/thesis/5-RE with LSTM/code/HRL-RE-use/data/NYT10_demo/"
 
 
 # argv = sys.argv[1:]

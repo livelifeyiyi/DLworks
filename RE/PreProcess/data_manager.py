@@ -70,16 +70,16 @@ class DataManager:
 						self.relationcnt[rel] = 1
 					else:
 						self.relationcnt[rel] += 1
-		self.relations.append('UKN')
+		# self.relations.append('UKN')
 		self.relation_count = len(self.relations)
 		for name in ['train', 'test', 'dev']:
 			for item in self.data[name]:
 				for t in item['relations']:
 					try:
-						t['type'] = self.relations.index(t['rtext']) + 1
+						t['type'] = self.relations.index(t['rtext']) + 1  # +1 #####
 					except Exception as e:
 						print(e)
-						t['type'] = self.relations.index('UKN') + 1
+						# t['type'] = self.relations.index('UKN') + 1
 		print(self.relationcnt)
 		print(self.relations)
 		print(self.relation_count)
