@@ -13,7 +13,7 @@ import BiLSTM_LSTM
 import Jointly_RL
 from Parser import Parser
 # from TFgirl.RE.PreProcess.data_manager import DataManager
-from general_utils import padding_sequence, get_minibatches
+from general_utils import padding_sequence, get_minibatches, padding_sequence_recurr
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -43,7 +43,7 @@ if __name__ == "__main__":
 		test_relation_tags = pickle.load(inp)  # relation type_id
 		test_relation_names = pickle.load(inp)  # relation name'''
 
-	with open(args.datapath + 'data_dev.pkl', 'rb') as inp:
+	with open(args.datapath + 'data_train.pkl', 'rb') as inp:
 		dev_sentences_words = pickle.load(inp)  # sentence with words
 		dev_sentences_id = pickle.load(inp)  # sentence with word_ids
 		dev_position_lambda = pickle.load(inp)  # position lambda
@@ -76,13 +76,13 @@ if __name__ == "__main__":
 	l2 = args.l2  # data['l2']
 	print("relation count: ", relation_count)
 	print("Reading vector file......")
-	vec_model = KeyedVectors.load_word2vec_format(args.datapath + 'vector2.txt', binary=False)
+	vec_model = KeyedVectors.load_word2vec_format(args.datapath + 'vector_demo', binary=False)
 	# vec_model = KeyedVectors.load_word2vec_format('/home/xiaoya/data/GoogleNews-vectors-negative300.bin.gz', binary=True)
 
 	# load models
 	encoder = BiLSTM_LSTM.EncoderRNN(args, wv).to(device)
 	decoder = BiLSTM_LSTM.DecoderRNN(args, wv).to(device)
-	relation_model = Jointly_RL.RelationModel(args.dropout, dim, statedim, relation_count, noisy_count)
+	relation_model = Jointly_RL.RelationModel(args, dim, statedim, relation_count, noisy_count)
 	# RL_model = Jointly_RL.RLModel(args.batchsize, dim, statedim, relation_count, learning_rate, relation_model, args.datapath)
 	RL_model = Jointly_RL.RLModel(args.batchsize, dim, statedim, relation_count, vec_model)
 
@@ -106,11 +106,11 @@ if __name__ == "__main__":
 	decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate, weight_decay=l2)
 	RE_optimizer = optim.Adam(relation_model.parameters(), lr=args.lr_RL, weight_decay=l2)
 	RL_optimizer = optim.Adam(RL_model.parameters(), lr=args.lr_RL, weight_decay=l2)
-
+	sentence_reward_noisy = [0 for i in range(args.batchsize)]
+	noisy_sentences_vec = Variable(torch.FloatTensor(1, dim).fill_(0))
 	for e in range(args.epochRL):
 		print("training epoch ", e)
-		sentence_reward_noisy = [0 for i in range(args.batchsize)]
-		noisy_sentences_vec = Variable(torch.FloatTensor(1, dim).fill_(0))
+
 		# random.shuffle(train_data)
 		# batchcnt = (len(train_data) - 1) // args.batchsize + 1
 		# for b in range(batchcnt):
@@ -126,18 +126,21 @@ if __name__ == "__main__":
 			input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
 			pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=0)
 			target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
+			relation_target_tensor = padding_sequence_recurr(relation_tags)
 			if torch.cuda.is_available():
 				input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 				target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
 				pos_tensor = Variable(torch.cuda.FloatTensor(pos_tensor, device=device)).cuda()
+				relation_target_tensor = Variable(torch.cuda.LongTensor(relation_target_tensor, device=device)).cuda()
 			else:
 				input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
 				target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
 				pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
+				relation_target_tensor = Variable(torch.LongTensor(relation_target_tensor, device=device))
 
-
-			seq_loss, encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, pos_tensor, target_tensor, encoder,
+			seq_loss, encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden = BiLSTM_LSTM.train(input_tensor, pos_tensor, target_tensor, encoder,
 						decoder, encoder_optimizer, decoder_optimizer, criterion, args.batchsize)  # , input_length, target_length
+
 			out_losses.append(seq_loss)
 			# print_loss_total += seq_loss
 			# # plot_loss_total += loss
@@ -159,10 +162,13 @@ if __name__ == "__main__":
 			# 	RL_model.cuda()
 
 			# print("Testing RL based RE......")
-			RL_RE_loss, RE_rewards, TOTAL_rewards = RL_model(input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
-											  sentence_reward_noisy, noisy_sentences_vec, RE_optimizer, RL_optimizer, relation_model,
-											  args.sampleround, tags, sentences_words,
-											  relation_tags, relation_names, seq_loss)
+			RL_RE_loss, RE_rewards, TOTAL_rewards = RL_model(input_tensor, encoder_outputs, decoder_output,
+															 decoder_output_tag, decoder_hidden,
+															 sentence_reward_noisy, noisy_sentences_vec, RE_optimizer,
+															 RL_optimizer, relation_model,
+															 args.sampleround, tags, sentences_words,
+															 relation_tags, relation_names, relation_target_tensor, criterion,
+															 seq_loss)  # relation_target_tensor, criterion
 			RL_RE_losses.append(RL_RE_loss)
 			RE_rewardsall.append(RE_rewards)
 			TOTAL_rewardsall.append(TOTAL_rewards)
