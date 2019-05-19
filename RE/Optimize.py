@@ -109,27 +109,6 @@ class Optimize(object):
 		# r *= len(RE_actions)   # why?????
 		return r - top_bias
 
-	def calcEntityReward(self, bot_action, gold_labels):
-		lenth = len(gold_labels)
-		r = [0. for i in range(lenth)]  # for j in range(len(bot_action))]
-		# j = 0
-		# for i in range(lenth):
-			# if top_action[i] > 0:
-				# for label in gold_labels:
-					# if label['type'] == top_action[i]:
-		for t in range(lenth):
-			if gold_labels[t] == bot_action[t]:
-				if gold_labels[t] in [1, 2, 4, 5]:
-					r[t] = 1  # source and target entities
-				elif gold_labels[t] in [3, 6]:
-					r[t] = 0.7  # non-concerned entities
-				elif gold_labels[t] in [0]:
-					r[t] = 0.3  # non-entities
-			else:  # wrong labeled
-				r[t] = -0.5
-		# j += 1
-		return r
-
 	def calcEntityFinalReward(self, bot_action, gold_labels, bot_bias=0.):
 		lenth = len(gold_labels)
 		r = [0. for j in range(lenth)]
@@ -231,6 +210,27 @@ class Optimize(object):
 		return loss
 	'''
 
+	def calcEntityReward(self, bot_action, gold_labels):
+		lenth = len(gold_labels)
+		r = [0. for i in range(lenth)]  # for j in range(len(bot_action))]
+		# j = 0
+		# for i in range(lenth):
+		# if top_action[i] > 0:
+		# for label in gold_labels:
+		# if label['type'] == top_action[i]:
+		for t in range(lenth):
+			if gold_labels[t] == bot_action[t]:
+				if gold_labels[t] in [1, 2, 4, 5]:
+					r[t] = 1  # source and target entities
+				elif gold_labels[t] in [3, 6]:
+					r[t] = 0.7  # non-concerned entities
+				elif gold_labels[t] in [0]:
+					r[t] = 0.3  # non-entities
+			else:  # wrong labeled
+				r[t] = -0.5
+		# j += 1
+		return r
+
 	def calcREFinalReward_F(self, RE_actions, labels):
 		sample_round = len(RE_actions)
 		r = 0.
@@ -254,7 +254,7 @@ class Optimize(object):
 		relation_reward = self.calcREFinalReward_F(RE_actions, relation_label)
 		entity_rewards = self.calcEntityReward(entity_actions, train_entity_tags)
 		entity_reward = np.mean(np.array(entity_rewards))
-		top_bias = relation_reward * 0.6 + entity_reward * 0.4  # -entity_loss
+		reward = relation_reward * 0.7 + entity_reward * 0.3  # -entity_loss
 		if torch.cuda.is_available():
 			# grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0), requires_grad=True)
 			top_actprobs = torch.cuda.FloatTensor(top_actprobs)
@@ -262,13 +262,16 @@ class Optimize(object):
 			# grads = autograd.Variable(torch.FloatTensor(1, ).fill_(0), requires_grad=True)
 			top_actprobs = torch.FloatTensor(top_actprobs)
 
-		to_grad = -torch.sum(torch.log(top_actprobs).float())  # - ???
+		# to_grad = -torch.sum(torch.log(top_actprobs).float())  # - ???
 		if torch.cuda.is_available():
-			to_grad = to_grad * autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(top_bias), requires_grad=True)
+			top_bias = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(reward), requires_grad=True)  # to_grad *=
 		else:
-			to_grad = to_grad * autograd.Variable(torch.FloatTensor(1, ).fill_(top_bias), requires_grad=True)
+			top_bias = autograd.Variable(torch.FloatTensor(1, ).fill_(reward), requires_grad=True)
 
-		return to_grad, relation_reward
+		to_grad = torch.sum(torch.mul(torch.log(top_actprobs), top_bias)).mul(-1)
+
+		# to_grad.backward()
+		return to_grad, relation_reward, reward
 
 	def optimize(self, RE_actions, top_actprobs, relation_label, entity_loss):  # entity_label, entity_actions, entity_probs,
 		sample_round = len(RE_actions)

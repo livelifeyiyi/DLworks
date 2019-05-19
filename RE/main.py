@@ -13,7 +13,7 @@ import BiLSTM_LSTM
 import Jointly_RL
 from Parser import Parser
 # from TFgirl.RE.PreProcess.data_manager import DataManager
-from general_utils import padding_sequence, get_minibatches
+from general_utils import padding_sequence, get_minibatches, padding_sequence_recurr
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -68,17 +68,23 @@ if __name__ == "__main__":
 	tmp = []
 	for j in train_relation_tags:
 		tmp += j
-	relation_count = len(set(tmp))  # args.relation_tag_size  # data['relation_tag_size']
+	relations = set(tmp)
+	print(relations)
+	relation_count = len(relations)  # args.relation_tag_size  # data['relation_tag_size']
 	noisy_count = args.noisy_tag_size  # ata['noisy_tag_size']
 	learning_rate = args.lr  # data['lr']
 	l2 = args.l2  # data['l2']
 	print("relation count: ", relation_count)
+	print("Reading vector file......")
+	vec_model = KeyedVectors.load_word2vec_format(args.datapath + 'vector_demo', binary=False)  # vector_demo vector2.txt
+	# vec_model = KeyedVectors.load_word2vec_format('/home/xiaoya/data/GoogleNews-vectors-negative300.bin.gz', binary=True)
 
 	# load models
 	encoder = BiLSTM_LSTM.EncoderRNN(args, wv).to(device)
 	decoder = BiLSTM_LSTM.DecoderRNN(args, wv).to(device)
-	relation_model = Jointly_RL.RelationModel(dim, statedim, relation_count, noisy_count)
+	relation_model = Jointly_RL.RelationModel(args, dim, statedim, relation_count, noisy_count)
 	# RL_model = Jointly_RL.RLModel(args.batchsize, dim, statedim, relation_count, learning_rate, relation_model, args.datapath)
+	RL_model = Jointly_RL.RLModel(args.batchsize, dim, statedim, relation_count, vec_model)
 
 	criterion = nn.NLLLoss()  # CrossEntropyLoss()
 	# attn_decoder1 = AttnDecoderRNN(hidden_size, output_lang.n_words, dropout_p=0.1).to(device)
@@ -87,21 +93,23 @@ if __name__ == "__main__":
 		decoder = decoder.cuda()
 		criterion = criterion.cuda()
 		relation_model = relation_model.cuda()
-		# RL_model.cuda()
+		# RL_model = RL_model.cuda()
+		RL_model.cuda()
 	out_losses = []
 	RL_RE_losses = []
 	RE_rewardsall = []
+	TOTAL_rewardsall = []
 	print_loss_total = 0  # Reset every print_every
 	# plot_loss_total = 0  # Reset every plot_every
 
 	encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate, weight_decay=l2)  # SGD
 	decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate, weight_decay=l2)
-	print("Reading vector file......")
-	vec_model = KeyedVectors.load_word2vec_format(args.datapath + 'vector2.txt', binary=False)
-	# vec_model = KeyedVectors.load_word2vec_format('/home/xiaoya/data/GoogleNews-vectors-negative300.bin.gz', binary=True)
+	RE_optimizer = optim.Adam(relation_model.parameters(), lr=learning_rate, weight_decay=l2)
+	RL_optimizer = optim.Adam(RL_model.parameters(), lr=args.lr_RL, weight_decay=l2)
+	sentence_reward_noisy = [0 for i in range(args.batchsize)]
+	noisy_sentences_vec = Variable(torch.FloatTensor(1, dim).fill_(0))
 	for e in range(args.epochRL):
 		print("training epoch ", e)
-
 		# random.shuffle(train_data)
 		# batchcnt = (len(train_data) - 1) // args.batchsize + 1
 		# for b in range(batchcnt):
@@ -117,18 +125,21 @@ if __name__ == "__main__":
 			input_tensor, input_length = padding_sequence(sentences, pad_token=args.embedding_size)
 			pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=0)
 			target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
+			relation_target_tensor = padding_sequence_recurr(relation_tags)
 			if torch.cuda.is_available():
 				input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 				target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
 				pos_tensor = Variable(torch.cuda.FloatTensor(pos_tensor, device=device)).cuda()
+				relation_target_tensor = Variable(torch.cuda.LongTensor(relation_target_tensor, device=device)).cuda()
 			else:
 				input_tensor = Variable(torch.LongTensor(input_tensor, device=device))
 				target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
 				pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
+				relation_target_tensor = Variable(torch.LongTensor(relation_target_tensor, device=device))
 
-
-			seq_loss, encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, pos_tensor, target_tensor, encoder,
+			seq_loss, encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden = BiLSTM_LSTM.train(input_tensor, pos_tensor, target_tensor, encoder,
 						decoder, encoder_optimizer, decoder_optimizer, criterion, args.batchsize)  # , input_length, target_length
+
 			out_losses.append(seq_loss)
 			# print_loss_total += seq_loss
 			# # plot_loss_total += loss
@@ -137,33 +148,48 @@ if __name__ == "__main__":
 			# 	print_loss_avg = print_loss_total / (print_every*b//print_every)
 			# 	print_loss_total = 0
 			print('seq-seq model: (%d %.2f%%), loss: %.4f' % (b, float(b) / batchcnt * 100, seq_loss))
-			RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag, args.batchsize,
-										dim, statedim, relation_count, learning_rate, relation_model, vec_model)
-			if torch.cuda.is_available():
-				RL_model.cuda()
 
 			print("Training RL based RE......")
 			# sentences, encoder_output, decoder_output, decoder_output_prob, round_num, train_entity_tags,
 			# train_sentences_words, train_relation_tags, train_relation_names, seq_loss, TEST=False
 			# input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
-			RL_RE_loss, RE_rewards = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names, seq_loss)
+			# RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
+			# 							  args.batchsize_test,
+			# 							  dim, statedim, relation_count,
+			# 							  vec_model)
+			# if torch.cuda.is_available():
+			# 	RL_model.cuda()
+
+			# print("Testing RL based RE......")
+			RL_RE_loss, RE_rewards, TOTAL_rewards = RL_model(input_tensor, encoder_outputs, decoder_output,
+															 decoder_output_tag, decoder_hidden,
+															 sentence_reward_noisy, noisy_sentences_vec, RE_optimizer,
+															 RL_optimizer, relation_model,
+															 args.sampleround, tags, sentences_words,
+															 relation_tags, relation_names,
+															 relation_target_tensor, criterion, seq_loss)  #  relation_target_tensor, criterion
 			RL_RE_losses.append(RL_RE_loss)
 			RE_rewardsall.append(RE_rewards)
+			TOTAL_rewardsall.append(TOTAL_rewards)
+
 		np.save("seq2seq_loss_train", out_losses)
 		np.save("RL_RE_loss_train", RL_RE_losses)
 		np.save("RE_rewards_train", RE_rewardsall)
-		try:
-			model_name = "./model/model_encoder_epoch%s.pkl" % e
-			torch.save(encoder, model_name)
-			model_name = "./model/model_decoder_epoch%s.pkl" % e
-			torch.save(decoder, model_name)
-			model_name = "./model/relation_model_epoch%s.pkl" % e
-			torch.save(relation_model, model_name)
-			model_name = "./model/RL_model_epoch%s.pkl" % e
-			torch.save(RL_model, model_name)
-			print("Model has been saved")
-		except Exception as e:
-			print(e)
+		np.save("TOTAL_rewards_train", TOTAL_rewardsall)
+
+		if e % 10 == 0 or e == args.epochRL - 1:
+			try:
+				model_name = "./model/model_encoder_epoch%s.pkl" % e
+				torch.save(encoder, model_name)
+				model_name = "./model/model_decoder_epoch%s.pkl" % e
+				torch.save(decoder, model_name)
+				model_name = "./model/relation_model_epoch%s.pkl" % e
+				torch.save(relation_model, model_name)
+				model_name = "./model/RL_model_epoch%s.pkl" % e
+				torch.save(RL_model, model_name)
+				print("Model has been saved")
+			except Exception as e:
+				print(e)
 
 		# ********************dev data*********************
 		if args.test:
@@ -186,7 +212,7 @@ if __name__ == "__main__":
 					target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
 					pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
 
-				encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, pos_tensor,
+				encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden = BiLSTM_LSTM.train(input_tensor, pos_tensor,
 																						target_tensor, encoder,
 																						decoder,
 																						encoder_optimizer,
@@ -194,25 +220,18 @@ if __name__ == "__main__":
 																						criterion,
 																						args.batchsize_test,
 																						TEST=True)  # , input_length, target_length
-				# out_losses.append(seq_loss)
-				# print_loss_total += seq_loss
-				# plot_loss_total += loss
-				# print_every = 10
-				# if (b + 1) % print_every == 0:
-				# 	print_loss_avg = print_loss_total / (print_every * b // print_every)
-				# 	print_loss_total = 0
+
 				print('***DEV***seq-seq model: (%d %.4f%%)' % (b, float(b) / batchcnt * 100))
 
-				RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
-											  args.batchsize_test,
-											  dim, statedim, relation_count, learning_rate, relation_model,
-											  vec_model)
-				if torch.cuda.is_available():
-					RL_model.cuda()
-
 				# print("Testing RL based RE......")
-				RL_RE_loss = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names,
-									  seq_loss=0, flag="DEV")
+				RL_RE_loss, RE_rewards, TOTAL_rewards = RL_model(input_tensor, encoder_outputs, decoder_output,
+																 decoder_output_tag, decoder_hidden,
+																 sentence_reward_noisy, noisy_sentences_vec,
+																 RE_optimizer,
+																 RL_optimizer, relation_model,
+																 args.sampleround, tags, sentences_words,
+																 relation_tags, relation_names,
+																 relation_target_tensor, criterion, seq_loss=0, flag="DEV")
 
 		# ********************test data*********************
 		if args.test:
@@ -235,29 +254,24 @@ if __name__ == "__main__":
 					target_tensor = Variable(torch.LongTensor(target_tensor, device=device))
 					pos_tensor = Variable(torch.Tensor(pos_tensor, device=device))
 
-				encoder_outputs, decoder_output, decoder_output_tag = BiLSTM_LSTM.train(input_tensor, pos_tensor,
+				encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden = BiLSTM_LSTM.train(input_tensor, pos_tensor,
 																								  target_tensor, encoder,
 																								  decoder,
 																								  encoder_optimizer,
 																								  decoder_optimizer,
 																								  criterion,
 																								  args.batchsize_test, TEST=True)  # , input_length, target_length
-				# out_losses.append(seq_loss)
-				# print_loss_total += seq_loss
-				# plot_loss_total += loss
-				# print_every = 10
-				# if (b + 1) % print_every == 0:
-				# 	print_loss_avg = print_loss_total / (print_every * b // print_every)
-				# 	print_loss_total = 0
+
 				print('***TEST***seq-seq model: (%d %.4f%%)' % (b, float(b) / batchcnt * 100))
 
-				RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag, args.batchsize_test,
-												dim, statedim, relation_count, learning_rate, relation_model, vec_model)
-				if torch.cuda.is_available():
-					RL_model.cuda()
-
-				# print("Testing RL based RE......")
-				RL_RE_loss = RL_model(args.sampleround, tags, sentences_words, relation_tags, relation_names, seq_loss=0, flag="TEST")
+				RL_RE_loss, RE_rewards, TOTAL_rewards = RL_model(input_tensor, encoder_outputs, decoder_output,
+																 decoder_output_tag, decoder_hidden,
+																 sentence_reward_noisy, noisy_sentences_vec,
+																 RE_optimizer,
+																 RL_optimizer, relation_model,
+																 args.sampleround, tags, sentences_words,
+																 relation_tags, relation_names,
+																 relation_target_tensor, criterion, seq_loss=0, flag="TEST")
 				# RL_RE_losses.append(RL_RE_loss)
 			# np.save("seq2seq_loss_test", out_losses)
 			# np.save("RL_RE_loss_test", RL_RE_losses)
