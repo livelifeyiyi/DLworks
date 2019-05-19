@@ -181,9 +181,9 @@ def train(input_tensor, pos_tensor, target_tensor, encoder, decoder, encoder_opt
 		encoder_optimizer.step()
 		decoder_optimizer.step()
 
-		return loss.item() / float(target_length), encoder_outputs, decoder_output, decoder_output_tag
+		return loss.item() / float(target_length), encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
 	else:
-		return encoder_outputs, decoder_output, decoder_output_tag
+		return encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
 
 
 def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.001, l2=0.0001):

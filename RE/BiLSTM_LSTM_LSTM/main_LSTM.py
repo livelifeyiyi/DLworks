@@ -38,7 +38,7 @@ class evaluate():
 		# for i in range(len(relation_action)):  # each round
 		if isinstance(relation_action, np.int64):
 			for label in relation_labels:
-				if label == relation_action  and ok == 0 and label > 0:  # relation_action[i] == label and used[i] == 0
+				if label == relation_action and ok == 0 and label > 0:  # relation_action[i] == label and used[i] == 0
 					match = 1
 					for k in range(len(entity_labels)):
 						if entity_labels[k] == 4 and entity_action[k] != 4:
@@ -51,9 +51,9 @@ class evaluate():
 							match = 0
 					if match == 1:
 						ok = 1
+				self.acc += ok
 			if relation_action > 0:
 				cnt += 1
-				self.acc += ok
 			self.cnt += cnt
 		else:
 			for label in relation_labels:
@@ -70,17 +70,17 @@ class evaluate():
 							match = 0
 					if match == 1:
 						ok = 1
-					# used[i] = 1
-
+				self.acc += ok
+				# used[i] = 1
 			for i in range(len(relation_action)):
 				if relation_action[i] > 0:
 					# j += 1
 					cnt += 1
-					self.acc += ok
+
 			self.cnt += cnt // len(relation_labels)
 		return self.acc, self.tot, self.cnt
 
-	def cal_F_score(self, relation_actions_batch, train_relation_tags, train_entity_tags, entity_actions_batch, flag):
+	def cal_F_score(self, relation_actions_batch, train_relation_tags, train_relation_names,  train_entity_tags, entity_actions_batch, noisy_actions_batch, train_sentences_words, noisy_similarity_batch, flag):
 		batch_size = self.batch_size  # len(relation_actions_batch)
 		# cal the P,R and F of relation extraction for a batch of sentences
 		# acc_total, tot_total, cnt_total = 0., 0., 0.
@@ -91,7 +91,6 @@ class evaluate():
 		rec_R = 0.
 		acc_E, cnt_E, tot_E = 0., 0., 0.  # len(train_entity_tags)
 		acc_E_no0 = 0.
-
 		for sentence_id in range(batch_size):
 			relation_tag = list(set(train_relation_tags[sentence_id]))
 			if isinstance(relation_actions_batch[sentence_id], np.int64):
@@ -103,7 +102,13 @@ class evaluate():
 																  relation_tag,
 																  train_entity_tags[sentence_id])
 
-			if round_num > 1:
+			if isinstance(relation_actions_batch[sentence_id], np.int64):
+				if relation_actions_batch[sentence_id] in relation_tag:
+					acc_R += 1
+				if relation_actions_batch[sentence_id] > 0:
+					cnt_R += 1
+				cnt_R_last += round_num
+			else:
 				for i in range(round_num):
 					if int(relation_actions_batch[sentence_id][i]) in relation_tag:
 						acc_R += 1
@@ -111,15 +116,7 @@ class evaluate():
 						cnt_R += 1
 					# tot_R += 1
 				cnt_R_last += round_num // len(relation_tag)
-			else:
-				if relation_actions_batch[sentence_id] in relation_tag:
-					acc_R += 1
-				if relation_actions_batch[sentence_id] > 0:
-					cnt_R += 1
-				cnt_R_last += round_num
-
 			tot_R_relation_num += len(relation_tag)
-			# cnt_R_last += round_num  # // len(relation_tag)
 			for each_relation in relation_tag:
 				if each_relation > 0:
 					# tot_R += 1
@@ -138,6 +135,14 @@ class evaluate():
 					if int(entity_actions_batch[sentence_id][word_id]) == train_entity_tags[sentence_id][word_id]:
 						acc_E_no0 += 1
 				tot_E += 1
+			# store the noisy action and sentence in txt file
+			sentence_word = train_sentences_words[sentence_id]
+			noisy_tag = noisy_actions_batch[sentence_id]
+			noisy_reward = noisy_similarity_batch[sentence_id]
+			line = str(noisy_tag) + ",	" + str(noisy_reward) + ",	" + str(train_relation_names[sentence_id]) + ',	' + \
+					str(train_entity_tags[sentence_id]) + ",	" + sentence_word + "\n"
+			with codecs.open("./"+flag+"_sentence_noisy_tag.out", mode='a+', encoding='utf-8') as f:
+				f.write(line)
 
 		precision_total = acc_total / cnt_total
 		recall_total = acc_total / tot_total
@@ -147,10 +152,9 @@ class evaluate():
 		except Exception as e:
 			print(e)
 			F_total = 0.
-		print("********: TOTAL precision: " + str(precision_total) + ", recall: " + str(recall_total) + ", F-score: " + str(
-			F_total))
+		print("********: TOTAL precision: " + str(precision_total) + ", recall: " + str(recall_total) + ", F-score: " + str(F_total))
 		line_total = str(precision_total) + ", " + str(recall_total) + ", " + str(F_total) + "\n"
-		with codecs.open("./" + flag + "_TOTAL.out", mode='a+', encoding='utf-8') as f1:
+		with codecs.open("./"+flag+"_TOTAL.out", mode='a+', encoding='utf-8') as f1:
 			f1.write(line_total)
 
 		if cnt_R != 0 and tot_R_relation_num != 0:
@@ -164,7 +168,7 @@ class evaluate():
 		try:
 			F_RE = (1 + beta * beta) * precision_R * recall_R / (beta * beta * precision_R + recall_R)
 		except Exception as e:
-			# print(e)
+			print(e)
 			F_RE = 0.
 		print("********: Relation precision: " + str(acc_R / tot_R_relation_num) + ", " + str(
 			acc_R / cnt_R_last) + ", " + str(precision_R) +
@@ -172,7 +176,7 @@ class evaluate():
 
 		line_RE = str(acc_R / tot_R_relation_num) + ", " + str(acc_R / cnt_R_last) + ", " + str(
 			precision_R) + ",	" + str(recall_R) + ",	" + str(F_RE) + '\n'
-		with codecs.open("./" + flag + "_RE.out", mode='a+', encoding='utf-8') as f1:
+		with codecs.open("./"+flag+"_RE.out", mode='a+', encoding='utf-8') as f1:
 			f1.write(line_RE)
 
 		# cal the P,R and F of entity extraction for each sentence
@@ -186,7 +190,7 @@ class evaluate():
 		print("********: Entity precision: " + str(precision_E) + ", recall: " + str(recall_E) + ", F-score: " + str(F_NER))
 
 		line_NER = str(precision_E) + ",	" + str(recall_E) + ",	" + str(F_NER) + '\n'
-		with codecs.open("./" + flag + "_NER.out", mode='a+', encoding='utf-8') as f2:
+		with codecs.open("./"+flag+"_NER.out", mode='a+', encoding='utf-8') as f2:
 			f2.write(line_NER)
 
 	def sample(self, prob, training, position=None, preoptions=None):
