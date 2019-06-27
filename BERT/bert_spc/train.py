@@ -10,7 +10,7 @@ from time import strftime, localtime
 import random
 import numpy
 
-from pytorch_pretrained_bert import BertModel
+from pytorch_pretrained_bert import BertModel, optimization
 from sklearn import metrics
 import torch
 import torch.nn as nn
@@ -174,7 +174,7 @@ class Instructor:
         # Loss and Optimizer
         criterion = nn.CrossEntropyLoss()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
-        optimizer = self.opt.optimizer(_params, lr=self.opt.learning_rate, weight_decay=self.opt.l2reg)
+        optimizer = optimization.BertAdam(_params, lr=self.opt.learning_rate, weight_decay=self.opt.l2reg)
 
         train_data_loader = DataLoader(dataset=self.trainset, batch_size=self.opt.batch_size, shuffle=True)
         test_data_loader = DataLoader(dataset=self.testset, batch_size=self.opt.batch_size, shuffle=False)
@@ -208,7 +208,7 @@ def main():
     parser.add_argument('--embed_dim', default=300, type=int)
     parser.add_argument('--hidden_dim', default=300, type=int)
     parser.add_argument('--bert_dim', default=768, type=int)
-    parser.add_argument('--pretrained_bert_name', default='bert-base-uncased', type=str)
+    parser.add_argument('--pretrained_bert_name', default='bert-base-chinese/', type=str)
     parser.add_argument('--max_seq_len', default=100, type=int) # 80
     parser.add_argument('--polarities_dim', default=3, type=int)
     parser.add_argument('--hops', default=3, type=int)
@@ -258,7 +258,7 @@ def main():
     opt.dataset_file = dataset_files  # [opt.dataset_dir]
     opt.inputs_cols = input_colses[opt.model_name]
     opt.initializer = initializers[opt.initializer]
-    opt.optimizer = optimizers[opt.optimizer]
+    # opt.optimizer = optimization.BertAdam(lr=opt.learning_rate)  # optimizers[opt.optimizer]
     opt.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') \
         if opt.device is None else torch.device(opt.device)
 
