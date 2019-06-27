@@ -97,8 +97,7 @@ class Instructor:
             n_correct, n_total, loss_total = 0, 0, 0
             # switch model to training mode
             self.model.train()
-            full_logits=[]
-            full_label_ids=[]
+
             for i_batch, sample_batched in enumerate(train_data_loader):
                 global_step += 1
                 # clear gradient accumulators
@@ -107,10 +106,7 @@ class Instructor:
                 inputs = [sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
                 outputs = self.model(inputs)
                 targets = sample_batched['polarity'].to(self.opt.device)
-                
-                full_logits.extend(outputs.tolist() )
-                full_label_ids.extend(targets.tolist() )
-                
+
                 loss = criterion(outputs, targets)
                 loss.backward()
                 optimizer.step()
@@ -124,8 +120,6 @@ class Instructor:
                     logger.info('loss: {:.4f}, acc: {:.4f}'.format(train_loss, train_acc))
                     # f1 = metrics.f1_score(targets.cpu(), torch.argmax(outputs, -1).cpu(), labels=[0, 1, 2],
                     #                     #                       average='macro')
-            with open("predictions.json", "a+") as fw:
-                json.dump({"logits": full_logits, "label_ids": full_label_ids}, fw)
 
             val_acc, val_f1 = self._evaluate_acc_f1(val_data_loader)
             logger.info('> val_acc: {:.4f}, val_f1: {:.4f}'.format(val_acc, val_f1))
@@ -147,6 +141,8 @@ class Instructor:
         # switch model to evaluation mode
         self.model.eval()
         with torch.no_grad():
+            full_logits = []
+            full_label_ids = []
             for t_batch, t_sample_batched in enumerate(data_loader):
                 t_inputs = [t_sample_batched[col].to(self.opt.device) for col in self.opt.inputs_cols]
                 t_targets = t_sample_batched['polarity'].to(self.opt.device)
@@ -154,7 +150,10 @@ class Instructor:
 
                 n_correct += (torch.argmax(t_outputs, -1) == t_targets).sum().item()
                 n_total += len(t_outputs)
-                
+
+                full_logits.extend(t_outputs.tolist())
+                full_label_ids.extend(t_targets.tolist())
+
                 if t_targets_all is None:
                     t_targets_all = t_targets
                     t_outputs_all = t_outputs
@@ -164,8 +163,11 @@ class Instructor:
 
         acc = n_correct / n_total
         f1 = metrics.f1_score(t_targets_all.cpu(), torch.argmax(t_outputs_all, -1).cpu(), labels=[0, 1, 2], average='macro')
-        with open('pred_res', encoding='utf-8', mode='a+') as tfile:
-                    tfile.write(str((torch.argmax(t_outputs_all, -1) == t_targets_all).cpu())+'\n')
+        # with open('pred_res', encoding='utf-8', mode='a+') as tfile:
+        #             tfile.write(str((torch.argmax(t_outputs_all, -1) == t_targets_all).cpu())+'\n')
+        with open("predictions.json", "a+") as fw:
+            json.dump({"logits": full_logits, "label_ids": full_label_ids}, fw)
+
         return acc, f1
 
     def run(self):
