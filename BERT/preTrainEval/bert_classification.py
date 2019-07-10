@@ -49,6 +49,7 @@ if sys.version_info[0] == 2:
 else:
 	import pickle
 
+nvmlInit()
 logger = logging.getLogger(__name__)
 print(time.time())
 
@@ -157,6 +158,7 @@ def main():
 		ptvsd.wait_for_attach()
 	if args.cuda_device:
 		device = torch.device("cuda:%s" % args.cuda_device)
+		n_gpu = 1
 	else:
 		if args.local_rank == -1 or args.no_cuda:
 			device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -215,9 +217,9 @@ def main():
 	tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 	model = BertForSequenceClassification.from_pretrained(args.bert_model, num_labels=num_labels)
 	etime = time.time()
-	gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
-	gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
-	logger.info("Model loaded in %s seconds, GPU usage:%s" % (etime-stime, gpu_info.used))
+	# gpu_handle = nvmlDeviceGetHandleByIndex(int(args.cuda_device))
+	# gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
+	logger.info("Model loaded in %s seconds" % (etime-stime))
 
 	if args.local_rank == 0:
 		torch.distributed.barrier()
@@ -225,6 +227,10 @@ def main():
 	if args.fp16:
 		model.half()
 	model.to(device)
+	gpu_handle = nvmlDeviceGetHandleByIndex(int(args.cuda_device))
+	gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
+	logger.info("GPU usage:%s" % (gpu_info.used / 2 ** 30))
+
 	if args.local_rank != -1:
 		model = torch.nn.parallel.DistributedDataParallel(model,
 														  device_ids=[args.local_rank],
@@ -316,9 +322,9 @@ def main():
 
 		model.train()
 
-		gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
+		gpu_handle = nvmlDeviceGetHandleByIndex(int(args.cuda_device))
 		gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
-		logger.info("Model start training, GPU usage:%s" % (gpu_info.used))
+		logger.info("Model start training, GPU usage:%s" % (gpu_info.used/2**30))
 
 		for _ in trange(int(args.num_train_epochs), desc="Epoch", disable=args.local_rank not in [-1, 0]):
 			epoch_stime = time.time()
@@ -366,9 +372,9 @@ def main():
 						tb_writer.add_scalar('lr', optimizer.get_lr()[0], global_step)
 						tb_writer.add_scalar('loss', loss.item(), global_step)
 			epoch_etime = time.time()
-			gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
+			gpu_handle = nvmlDeviceGetHandleByIndex(int(args.cuda_device))
 			gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
-			logger.info("Training epoch cost %s seconds, GPU usage:%s" % (epoch_etime - epoch_stime, gpu_info.used))
+			logger.info("Training epoch cost %s seconds, GPU usage:%s" % (epoch_etime - epoch_stime, gpu_info.used/2**30))
 	# ## Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
 	# ## Example:
 	if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
@@ -490,9 +496,9 @@ def main():
 				writer.write("%s = %s\n" % (key, str(result[key])))
 
 		eval_etime = time.time()
-		gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
+		gpu_handle = nvmlDeviceGetHandleByIndex(int(args.cuda_device))
 		gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
-		logger.info("Training epoch cost %s seconds, GPU usage:%s" % (eval_etime - eval_stime, gpu_info.used))
+		logger.info("Training epoch cost %s seconds, GPU usage:%s" % (eval_etime - eval_stime, gpu_info.used/2**30))
 
 		# hack for MNLI-MM
 		if task_name == "mnli":
@@ -570,3 +576,4 @@ def main():
 
 if __name__ == "__main__":
 	main()
+	nvmlShutdown()
