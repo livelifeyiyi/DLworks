@@ -76,6 +76,7 @@ def main():
 						type=str,
 						required=True,
 						help="The output directory where the model predictions and checkpoints will be written.")
+	parser.add_argument('--cuda_device', default=None, type=str, help='e.g. 0')
 
 	## Other parameters
 	parser.add_argument("--cache_dir",
@@ -154,16 +155,18 @@ def main():
 		print("Waiting for debugger attach")
 		ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
 		ptvsd.wait_for_attach()
-
-	if args.local_rank == -1 or args.no_cuda:
-		device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-		n_gpu = torch.cuda.device_count()
+	if args.cuda_device:
+		device = torch.device("cuda:%s" % args.cuda_device)
 	else:
-		torch.cuda.set_device(args.local_rank)
-		device = torch.device("cuda", args.local_rank)
-		n_gpu = 1
-		# Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-		torch.distributed.init_process_group(backend='nccl')
+		if args.local_rank == -1 or args.no_cuda:
+			device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+			n_gpu = torch.cuda.device_count()
+		else:
+			torch.cuda.set_device(args.local_rank)
+			device = torch.device("cuda", args.local_rank)
+			n_gpu = 1
+			# Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+			torch.distributed.init_process_group(backend='nccl')
 	args.device = device
 
 	logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
@@ -212,7 +215,7 @@ def main():
 	tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 	model = BertForSequenceClassification.from_pretrained(args.bert_model, num_labels=num_labels)
 	etime = time.time()
-	gpu_handle = nvmlDeviceGetHandleByIndex(0)
+	gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
 	gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
 	logger.info("Model loaded in %s seconds, GPU usage:%s" % (etime-stime, gpu_info.used))
 
@@ -313,7 +316,7 @@ def main():
 
 		model.train()
 
-		gpu_handle = nvmlDeviceGetHandleByIndex(0)
+		gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
 		gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
 		logger.info("Model start training, GPU usage:%s" % (gpu_info.used))
 
@@ -363,7 +366,7 @@ def main():
 						tb_writer.add_scalar('lr', optimizer.get_lr()[0], global_step)
 						tb_writer.add_scalar('loss', loss.item(), global_step)
 			epoch_etime = time.time()
-			gpu_handle = nvmlDeviceGetHandleByIndex(0)
+			gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
 			gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
 			logger.info("Training epoch cost %s seconds, GPU usage:%s" % (epoch_etime - epoch_stime, gpu_info.used))
 	# ## Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
@@ -487,7 +490,7 @@ def main():
 				writer.write("%s = %s\n" % (key, str(result[key])))
 
 		eval_etime = time.time()
-		gpu_handle = nvmlDeviceGetHandleByIndex(0)
+		gpu_handle = nvmlDeviceGetHandleByIndex(args.cuda_device)
 		gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
 		logger.info("Training epoch cost %s seconds, GPU usage:%s" % (eval_etime - eval_stime, gpu_info.used))
 
