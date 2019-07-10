@@ -187,8 +187,8 @@ class chnProcessor(DataProcessor):
 			if i == 0:
 				continue
 			guid = "%s-%s" % (set_type, i)
-			text_a = line[0]
-			label = line[1]
+			text_a = line[1]
+			label = line[0]
 			examples.append(
 				InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
 		return examples
@@ -224,6 +224,38 @@ class lcqmcProcessor(DataProcessor):
 				label = line[2]
 			except IndexError:
 				continue
+			examples.append(
+				InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
+		return examples
+
+
+class xnliProcessor(DataProcessor):
+	"""Processor for the RTE data set (GLUE version)."""
+
+	def get_train_examples(self, data_dir):
+		"""See base class."""
+		return self._create_examples(
+			self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+
+	def get_dev_examples(self, data_dir):
+		"""See base class."""
+		return self._create_examples(
+			self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+	def get_labels(self):
+		"""See base class."""
+		return ["entailment", "neutral", "contradiction"]
+
+	def _create_examples(self, lines, set_type):
+		"""Creates examples for the training and dev sets."""
+		examples = []
+		for (i, line) in enumerate(lines):
+			if i == 0:
+				continue
+			guid = "%s-%s" % (set_type, line[0])
+			text_a = line[0]
+			text_b = line[1]
+			label = line[2]
 			examples.append(
 				InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
 		return examples
@@ -526,7 +558,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
 		else:
 			raise KeyError(output_mode)
 
-		if ex_index < 5:
+		'''if ex_index < 5:
 			logger.info("*** Example ***")
 			logger.info("guid: %s" % (example.guid))
 			logger.info("tokens: %s" % " ".join(
@@ -535,7 +567,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length,
 			logger.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
 			logger.info(
 					"segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-			logger.info("label: %s (id = %d)" % (example.label, label_id))
+			logger.info("label: %s (id = %d)" % (example.label, label_id))'''
 
 		features.append(
 				InputFeatures(input_ids=input_ids,
@@ -619,6 +651,7 @@ def compute_metrics(task_name, preds, labels):
 processors = {
 	"chn": chnProcessor,  # chnsenticorp
 	"lcqmc": lcqmcProcessor,  # lcqmc
+	"xnli": xnliProcessor,  # xnli
 	"cola": ColaProcessor,
 	"mnli": MnliProcessor,
 	"mnli-mm": MnliMismatchedProcessor,
@@ -634,6 +667,7 @@ processors = {
 output_modes = {
 	"chn": "classification",
 	"lcqmc": "classification",
+	"xnli": "classification",
 	"cola": "classification",
 	"mnli": "classification",
 	"mrpc": "classification",
