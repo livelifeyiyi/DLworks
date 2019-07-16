@@ -4,6 +4,7 @@
 import os
 import pickle
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from pytorch_pretrained_bert import BertTokenizer
@@ -42,17 +43,18 @@ class ABSADataset(Dataset):
         fin = open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore')
         lines = fin.readlines()
         fin.close()
-        polity_dic = {'pos': 1, 'neg': -1, 'neu': 0}
+        # polity_dic = {'pos': 1, 'neg': -1, 'neu': 0}
         all_data = []
         for i in range(0, len(lines), 3):
             # title = lines[i].strip('\n')
             # aspect = lines[i + 1].lower().strip()
-            text_left, _, text_right = [s.lower().strip() for s in lines[i].partition("$T$")]
+            # text_left, _, text_right = [s.lower().strip() for s in lines[i].partition("$T$")]
+            segment = lines[i]
             aspect = lines[i + 1].lower().strip()
             polarity_str = lines[i + 2].strip()
 
-            # text_raw_indices = tokenizer.text_to_sequence(title)
-            text_raw_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right)
+            text_raw_indices = tokenizer.text_to_sequence(segment)
+            # text_raw_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right)
             # text_raw_without_aspect_indices = tokenizer.text_to_sequence(text_left + " " + text_right)
             # text_left_indices = tokenizer.text_to_sequence(text_left)
             # text_left_with_aspect_indices = tokenizer.text_to_sequence(text_left + " " + aspect)
@@ -62,10 +64,10 @@ class ABSADataset(Dataset):
             # left_context_len = np.sum(text_left_indices != 0)
             aspect_len = np.sum(aspect_indices != 0)
             # aspect_in_text = torch.tensor([left_context_len.item(), (left_context_len + aspect_len - 1).item()])
-            polarity = int(polity_dic[polarity_str]) + 1
+            polarity = int(polarity_str) + 1
 
-            # text_bert_indices = tokenizer.text_to_sequence('[CLS] ' + title + ' [SEP] ' + aspect + " [SEP]")
-            text_bert_indices = tokenizer.text_to_sequence('[CLS] ' + text_left + " " + aspect + " " + text_right + ' [SEP] ' + aspect + " [SEP]")
+            text_bert_indices = tokenizer.text_to_sequence('[CLS] ' + segment + ' [SEP] ' + aspect + " [SEP]")
+            # text_bert_indices = tokenizer.text_to_sequence('[CLS] ' + text_left + " " + aspect + " " + text_right + ' [SEP] ' + aspect + " [SEP]")
             bert_segments_ids = np.asarray([0] * (np.sum(text_raw_indices != 0) + 2) + [1] * (aspect_len + 1))
             bert_segments_ids = pad_and_truncate(bert_segments_ids, tokenizer.max_seq_len)
 
@@ -98,11 +100,43 @@ class ABSADataset(Dataset):
         return len(self.data)
 
 
-class ABSADataset_sentence_pair(Dataset):
+class SADataset(Dataset):
     def __init__(self, fname, tokenizer):
         fin = open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore')
         lines = fin.readlines()
         fin.close()
+        all_data = []
+        for i in range(0, len(lines), 2):
+            sentence = lines[i].strip('\n')
+            polarity_str = lines[i + 1].strip()
+
+            text_raw_indices = tokenizer.text_to_sequence(sentence)
+            polarity = int(polarity_str) + 1
+
+            text_bert_indices = tokenizer.text_to_sequence('[CLS] ' + sentence + " [SEP]")
+            bert_segments_ids = np.asarray([0] * (np.sum(text_raw_indices != 0) + 2))  # + [1] * (aspect_len + 1)
+            bert_segments_ids = pad_and_truncate(bert_segments_ids, tokenizer.max_seq_len)
+
+            data = {
+                'text_bert_indices': text_bert_indices,
+                'bert_segments_ids': bert_segments_ids,
+                'polarity': polarity,
+            }
+            all_data.append(data)
+        self.data = all_data
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+    def __len__(self):
+        return len(self.data)
+
+class ABSADataset_sentence_pair(Dataset):
+    def __init__(self, fname, tokenizer):
+        # fin = open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore')
+        # lines = fin.readlines()
+        # fin.close()
+        lines = pd.read_csv(fname, header=None, sep='\t').values
         polity_dic = {'pos': 1, 'neg': -1, 'neu': 0}
         all_data = []
         for (i, line) in enumerate(lines):
@@ -157,4 +191,3 @@ class ABSADataset_sentence_pair(Dataset):
 
     def __len__(self):
         return len(self.data)
-

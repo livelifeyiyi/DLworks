@@ -93,7 +93,7 @@ class Instructor:
 							stdv = 1. / math.sqrt(p.shape[0])
 							torch.nn.init.uniform_(p, a=-stdv, b=stdv)
 
-	def _train(self, criterion, optimizer, train_data_loader, val_data_loader):
+	def _train(self, criterion, optimizer, train_data_loader, val_data_loader, test_data_loader):
 		max_val_acc = 0
 		max_val_f1 = 0
 		global_step = 0
@@ -125,21 +125,40 @@ class Instructor:
 					train_acc = n_correct / n_total
 					train_loss = loss_total / n_total
 					logger.info('loss: {:.4f}, acc: {:.4f}'.format(train_loss, train_acc))
+				if i_batch % 200 == 0:
+					logger.info("**********ground_truth data test**********")
+					test_acc, test_f1, pred_labels, label_ids = self._evaluate_acc_f1(test_data_loader)
+					logger.info('>> test_acc: {:.4f}, test_f1: {:.4f}'.format(test_acc, test_f1))
+					self.predict_vote(pred_labels, label_ids)
+					if not os.path.exists('evaluate_state_dict'):
+						os.mkdir('evaluate_state_dict')
+					path = 'evaluate_state_dict/epoch{0}_batch{1}_test_acc{2}'.format(epoch, i_batch, round(test_acc, 4))
+					torch.save(self.model.state_dict(), path)
 				# f1 = metrics.f1_score(targets.cpu(), torch.argmax(outputs, -1).cpu(), labels=[0, 1, 2],
 				#                     #                       average='macro')
 
-			val_acc, val_f1 = self._evaluate_acc_f1(val_data_loader)
+			val_acc, val_f1, full_pred, full_label_ids = self._evaluate_acc_f1(val_data_loader)
 			logger.info('> val_acc: {:.4f}, val_f1: {:.4f}'.format(val_acc, val_f1))
 			if val_acc > max_val_acc:
 				max_val_acc = val_acc
-				if not os.path.exists('state_dict'):
-					os.mkdir('state_dict')
-				path = 'state_dict/{0}_{1}_val_acc{2}'.format(self.opt.model_name, epoch, round(val_acc, 4))
-				torch.save(self.model.state_dict(), path)
-				logger.info('>> saved: {}'.format(path))
+				if not os.path.exists('evaluate_state_dict'):
+					os.mkdir('evaluate_state_dict')
+			path = 'evaluate_state_dict/{0}_{1}_val_acc{2}'.format(self.opt.model_name, epoch, round(val_acc, 4))
+			torch.save(self.model.state_dict(), path)
+			logger.info('>> saved: {}'.format(path))
 			if val_f1 > max_val_f1:
 				max_val_f1 = val_f1
 
+			# self.model.eval()
+			logger.info("**********ground_truth data test**********")
+			test_acc, test_f1, pred_labels, label_ids = self._evaluate_acc_f1(test_data_loader)
+			logger.info('>> test_acc: {:.4f}, test_f1: {:.4f}'.format(test_acc, test_f1))
+			self.predict_vote(pred_labels, label_ids)
+			if not self.opt.do_eval:
+				logger.info("**********souhu dev data test**********")
+				test_acc, test_f1, pred_labels, label_ids = self._evaluate_acc_f1(val_data_loader)
+				logger.info('>> test_acc: {:.4f}, test_f1: {:.4f}'.format(test_acc, test_f1))
+				self.predict_vote(pred_labels, label_ids)
 		return path
 
 	def _evaluate_acc_f1(self, data_loader):
@@ -246,14 +265,20 @@ class Instructor:
 			train_data_loader = DataLoader(dataset=self.trainset, batch_size=self.opt.batch_size, shuffle=True)
 			val_data_loader = DataLoader(dataset=self.valset, batch_size=self.opt.batch_size, shuffle=False)
 
-			best_model_path = self._train(criterion, optimizer, train_data_loader, val_data_loader)
+			best_model_path = self._train(criterion, optimizer, train_data_loader, val_data_loader, test_data_loader)
 			self.model.load_state_dict(torch.load(best_model_path))
 		else:
 			self.model.load_state_dict(torch.load(self.opt.best_model_path))
 		self.model.eval()
+		logger.info("**********ground_truth data test**********")
 		test_acc, test_f1, pred_labels, label_ids = self._evaluate_acc_f1(test_data_loader)
 		logger.info('>> test_acc: {:.4f}, test_f1: {:.4f}'.format(test_acc, test_f1))
 		self.predict_vote(pred_labels, label_ids)
+		if not self.opt.do_eval:
+			logger.info("**********souhu dev data test**********")
+			test_acc, test_f1, pred_labels, label_ids = self._evaluate_acc_f1(val_data_loader)
+			logger.info('>> test_acc: {:.4f}, test_f1: {:.4f}'.format(test_acc, test_f1))
+			self.predict_vote(pred_labels, label_ids)
 
 
 def main():
