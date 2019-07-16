@@ -32,7 +32,7 @@ from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 
-# from tensorboardX import SummaryWriter
+from tensorboardX import SummaryWriter
 
 from pytorch_pretrained_bert.file_utils import WEIGHTS_NAME, CONFIG_NAME
 from pytorch_pretrained_bert.modeling import BertForQuestionAnswering
@@ -59,6 +59,7 @@ def main():
                         "bert-base-multilingual-cased, bert-base-chinese.")
     parser.add_argument("--output_dir", default='./cmrc/', type=str,
                         help="The output directory where the model checkpoints and predictions will be written.")
+    parser.add_argument('--cuda_device', default=None, type=str, help='e.g. 0')
 
     ## Other parameters
     parser.add_argument("--train_file", default='cmrc_train.json', type=str, help="SQuAD json for training. E.g., train-v1.1.json")
@@ -137,16 +138,20 @@ def main():
         print("Waiting for debugger attach")
         ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
-
-    if args.local_rank == -1 or args.no_cuda:
-        device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-        n_gpu = torch.cuda.device_count()
-    else:
-        torch.cuda.set_device(args.local_rank)
-        device = torch.device("cuda", args.local_rank)
+    if args.cuda_device:
+        device = torch.device("cuda:%s" % args.cuda_device)
         n_gpu = 1
-        # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-        torch.distributed.init_process_group(backend='nccl')
+    else:
+
+        if args.local_rank == -1 or args.no_cuda:
+            device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+            n_gpu = torch.cuda.device_count()
+        else:
+            torch.cuda.set_device(args.local_rank)
+            device = torch.device("cuda", args.local_rank)
+            n_gpu = 1
+            # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+            torch.distributed.init_process_group(backend='nccl')
 
     logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                         datefmt = '%m/%d/%Y %H:%M:%S',
@@ -212,8 +217,8 @@ def main():
         model = torch.nn.DataParallel(model)
 
     if args.do_train:
-        # if args.local_rank in [-1, 0]:
-        #     tb_writer = SummaryWriter()
+        if args.local_rank in [-1, 0]:
+            tb_writer = SummaryWriter()
         # Prepare data loader
         train_examples = read_squad_examples(
             input_file=args.train_file, is_training=True, version_2_with_negative=args.version_2_with_negative)

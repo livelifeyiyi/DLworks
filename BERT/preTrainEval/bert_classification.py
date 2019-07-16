@@ -498,7 +498,7 @@ def main():
 		eval_etime = time.time()
 		gpu_handle = nvmlDeviceGetHandleByIndex(int(args.cuda_device))
 		gpu_info = nvmlDeviceGetMemoryInfo(gpu_handle)
-		logger.info("Training epoch cost %s seconds, GPU usage:%s" % (eval_etime - eval_stime, gpu_info.used/2**30))
+		logger.info("Evaluating epoch cost %s seconds, GPU usage:%s" % (eval_etime - eval_stime, gpu_info.used/2**30))
 
 		# hack for MNLI-MM
 		if task_name == "mnli":
