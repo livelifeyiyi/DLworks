@@ -174,6 +174,7 @@ def main():
 	assert args.pregenerated_data.is_dir(), \
 		"--pregenerated_data should point to the folder of files made by pregenerate_training_data.py!"
 
+
 	samples_per_epoch = []
 	for i in range(args.epochs):
 		epoch_file = args.pregenerated_data / f"epoch_{i}.json"
