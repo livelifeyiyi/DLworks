@@ -12,13 +12,22 @@ all_words = []
 
 def add_words(word, all_words):
 	# / , \u300, \n
-	word = word.replace(' ', '').replace('\n', '').replace('\\u300', '/')
-	if '/' in word or ',' in word:
-		all_words += re.split(r'[/,]', word)
-	elif isinstance(word, str):
-		all_words.append(word)
+	if isinstance(word, str):
+		word = word.replace(' ', '').replace('\n', '').replace('\\u300', '/')
+		word = re.sub(u"\\(.*?\\)|（.*?）|\\[.*?]", "", word)
+		if '/' in word or ',' in word or '、' in word:
+			all_words += re.split(r'[/,、]', word)
+		else:
+			all_words.append(word)
 	elif isinstance(word, list):
-		all_words += word
+		for each in word:
+			each = each.replace(' ', '').replace('\n', '').replace('\\u300', '/')
+			each = re.sub(u"\\(.*?\\)|（.*?）|\\[.*?]", "", each)
+			if '/' in each or ',' in each or '、' in each:
+				all_words += re.split(r'[/,、]', each)
+			else:
+				all_words.append(word)
+		# all_words += word
 	else:
 		print(word)
 	return all_words
