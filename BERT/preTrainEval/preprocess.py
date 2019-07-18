@@ -14,7 +14,9 @@ def add_words(word, all_words):
 	# / , \u300, \n
 	if isinstance(word, str):
 		word = word.replace(' ', '').replace('\n', '').replace('\\u300', '/')
-		word = re.sub(u"\\(.*?\\)|（.*?）|\\[.*?]", "", word)
+		word = re.sub(u"\\(.*?\\)|\\{.*?}|\\[.*?]", "", word)
+		word = re.sub(u"\\（.*?）|\\{.*?}|\\[.*?]|\\【.*?】", "", word.decode())
+		word = re.sub(r"\([（^)]）*\)", "", word)
 		if '/' in word or ',' in word or '、' in word:
 			all_words += re.split(r'[/,、]', word)
 		else:
@@ -22,7 +24,8 @@ def add_words(word, all_words):
 	elif isinstance(word, list):
 		for each in word:
 			each = each.replace(' ', '').replace('\n', '').replace('\\u300', '/')
-			each = re.sub(u"\\(.*?\\)|（.*?）|\\[.*?]", "", each)
+			word = re.sub(u"\\(.*?\\)|\\{.*?}|\\[.*?]", "", word)
+			word = re.sub(u"\\（.*?）|\\{.*?}|\\[.*?]|\\【.*?】", "", word.decode())
 			if '/' in each or ',' in each or '、' in each:
 				all_words += re.split(r'[/,、]', each)
 			else:
