@@ -15,7 +15,7 @@ logger = logging.getLogger()
 class BertData():
 	def __init__(self, args):
 		self.args = args
-		self.tokenizer = BertTokenizer.from_pretrained('../bert-base-chinese/', do_basic_tokenize=False)
+		self.tokenizer = BertTokenizer.from_pretrained(args.model_path, do_basic_tokenize=args.do_basic_tokenize)
 		self.sep_vid = self.tokenizer.vocab['[SEP]']
 		self.cls_vid = self.tokenizer.vocab['[CLS]']
 		self.pad_vid = self.tokenizer.vocab['[PAD]']
@@ -46,7 +46,8 @@ class BertData():
 		# text = [_clean(t) for t in text]
 		text = '。 [SEP] [CLS] '.join(src)
 		src_subtokens = self.tokenizer.tokenize(text)
-		if len(src_subtokens) > 510: src_subtokens = src_subtokens[:510]
+		if len(src_subtokens) > args.max_src_ntokens - 2:
+			src_subtokens = src_subtokens[:(args.max_src_ntokens-2)]
 		src_subtokens = ['[CLS]'] + src_subtokens + ['[SEP]']
 
 		src_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(src_subtokens)
@@ -54,7 +55,7 @@ class BertData():
 		segs = [_segs[i] - _segs[i - 1] for i in range(1, len(_segs))]
 		segments_ids = []
 		for i, s in enumerate(segs):
-			if (i % 2 == 0):
+			if i % 2 == 0:
 				segments_ids += s * [0]
 			else:
 				segments_ids += s * [1]
@@ -86,7 +87,7 @@ def process_lie_segment(line_json, datasets, bert):
 		sentences = content.split('。')  # re.split('([。])', content)
 		sentences = [entity_name] + [title] + sentences  # +'。'
 		sentence_num = len(sentences)
-		max_char = 512 - sentence_num * 2
+		max_char = args.max_src_ntokens - sentence_num * 2
 		segments = []
 		segment = ''
 		i = 0
@@ -118,7 +119,7 @@ def process_lie_segment(line_json, datasets, bert):
 			content_str = ' '.join(content_cut_list)
 
 			b_data = bert.preprocess([i for i in content_str.split('。') if i], emotion_dict[entity_emotion])
-			if (b_data is None):
+			if b_data is None:
 				continue
 			indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
 			b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
@@ -134,12 +135,13 @@ if __name__ == '__main__':
 	parser.add_argument("-map_path", default='../data/')
 	parser.add_argument("-input_file", default='../json_data/')
 	parser.add_argument("-save_path", default='../bert_data/')
-
-	parser.add_argument("-shard_size", default=2000, type=int)
-	parser.add_argument('-min_nsents', default=3, type=int)
-	parser.add_argument('-max_nsents', default=100, type=int)
+	parser.add_argument("-model_path", type=str, help="The pre-trained model path")
+	parser.add_argument('-do_basic_tokenize', default=False, action='store_true')
+	# parser.add_argument("-shard_size", default=2000, type=int)
+	# parser.add_argument('-min_nsents', default=3, type=int)
+	# parser.add_argument('-max_nsents', default=100, type=int)
 	parser.add_argument('-min_src_ntokens', default=30, type=int)  # drop the segments which are shorter than min_src_ntokens
-	parser.add_argument('-max_src_ntokens', default=200, type=int)
+	parser.add_argument('-max_src_ntokens', default=512, type=int)
 
 	# parser.add_argument("-lower", type=str2bool, nargs='?',const=True,default=True)
 
@@ -147,20 +149,28 @@ if __name__ == '__main__':
 
 	parser.add_argument('-dataset', default='', help='train, valid or test, defaul will process all datasets')
 
-	parser.add_argument('-n_cpus', default=2, type=int)
+	# parser.add_argument('-n_cpus', default=2, type=int)
 
 	args = parser.parse_args()
 	bert = BertData(args)
 	datasets = []
-	ROOT = "../data/"
-	json_file = ROOT + "demo_data.json"
-	target_file = ROOT + "demo_data_bertsum.train"
-	with open(json_file, encoding='utf-8', mode='r') as infile:
+	# ROOT = "../data/"
+	# json_file = ROOT + "demo_data.json"
+	# target_file = ROOT + "demo_data_bertsum.train"
+	with open(args.input_file, encoding='utf-8', mode='r') as infile:
 		entity_count = {}
 		sentences_num = []
 		data = json.load(infile)
+		count = 0.
 		for each in data:
 			datasets = process_lie_segment(each, datasets, bert)
+			count += 1
+			if count >= len(data) * 0.1:
+				logger.info('Saving validation set to %s' % args.save_path)
+				torch.save(datasets, args.save_path + 'valid.data')
+				datasets = []
 
-		logger.info('Saving to %s' % args.save_path)
-		torch.save(datasets, args.save_path)
+		logger.info('Saving training data to %s' % args.save_path)
+		torch.save(datasets, args.save_path + 'train.data')
+		total_num = len(datasets)
+		logger.info('Number of data :%s' % total_num)
