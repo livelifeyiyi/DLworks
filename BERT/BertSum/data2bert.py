@@ -3,13 +3,13 @@ import json
 import os
 import re
 from typing import List
-
+import pandas as pd
 import jieba
 import torch
 from pytorch_pretrained_bert import BertTokenizer
-import logging
-
-logger = logging.getLogger()
+# import logging
+#
+# logger = logging.getLogger()
 
 
 class BertData():
@@ -21,9 +21,9 @@ class BertData():
 		self.pad_vid = self.tokenizer.vocab['[PAD]']
 
 	def preprocess(self, src: List[str], label: int):
-		src[-1] += '。'
 		if len(src) == 0:
 			return None
+		src[-1] += '。'
 		# original_src_txt = ['。'.join(src)]
 
 		# labels = [0] * len(src)
@@ -73,7 +73,6 @@ def process_lie_segment(line_json, datasets, bert):
 	# emotion_dict = {"正向": 1, "负向": -1, "中性": 0}  #
 	title = line_json["title"]  # title 作为一个句子
 	content = line_json["content"].replace('\n', '').replace('\r', '')
-
 	# for news.xlsx
 	# entities = str(line_json["corporations"]).split('、')
 	# emotions = line_json['emotion'].split('、')
@@ -120,6 +119,69 @@ def process_lie_segment(line_json, datasets, bert):
 
 			b_data = bert.preprocess([i for i in content_str.split('。') if i], emotion_dict[entity_emotion])
 			if b_data is None:
+				print(line_json["newsId"])
+				continue
+			indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
+			b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
+			               'src_txt': src_txt}
+			datasets.append(b_data_dict)
+
+	return datasets
+
+
+def process_lie_segment_test(line_json, datasets, bert):
+
+	# emotion_dict = {'NORM': 1, 'NEG': 0, 'POS': 2}  # 0,-1,1
+	emotion_dict = {"正向": 2, "负向": 0, "中性": 1}  # 1, -1, 0
+	title = line_json["title"]  # title 作为一个句子
+	content = line_json["content"].replace('\n', '').replace('\r', '')
+	# for news.xlsx
+	entities = str(line_json["corporations"]).split('、')
+	emotions = line_json['emotion'].split('、')
+	for i in range(len(entities)):
+		entity_name = entities[i]
+		entity_emotion = emotions[i]
+		# for entity in line_json["coreEntityEmotions"]:
+		# 	entity_name = entity["entity"]
+		# 	entity_emotion = entity["emotion"]
+		# process content, each sentence
+		sentences = content.split('。')  # re.split('([。])', content)
+		sentences = [entity_name] + [title] + sentences  # +'。'
+		sentence_num = len(sentences)
+		max_char = args.max_src_ntokens - sentence_num * 2
+		segments = []
+		segment = ''
+		i = 0
+		while i <= sentence_num:
+			if i == sentence_num:
+				if len(segment) >= args.min_src_ntokens:
+					segments.append(segment)
+				i += 1
+				break
+			eachsent = sentences[i] + '。'
+			if len(segment) + len(eachsent) < max_char:
+				segment += eachsent
+				i += 1
+			else:
+				segments.append(segment)
+				segment = entity_name + '。' + title + '。' + eachsent
+				i += 1
+
+		jieba.add_word(entity_name)
+
+		for segment in segments:
+			# if entity_name in segment:
+			segment = segment.replace(' ', '')
+			segment = segment.replace('\n', '')
+			segment = segment.replace('\t', '')
+			# res += segment + '\n' + entity_name + '\n' + str(emotion_dict[entity_emotion]) + '\n'
+			segemnt_cut = jieba.cut(segment)
+			content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
+			content_str = ' '.join(content_cut_list)
+
+			b_data = bert.preprocess([i for i in content_str.split('。') if i], emotion_dict[entity_emotion])
+			if b_data is None:
+				print(line_json["corporations"])
 				continue
 			indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
 			b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
@@ -131,23 +193,24 @@ def process_lie_segment(line_json, datasets, bert):
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	parser.add_argument("-mode", default='', type=str, help='format_to_lines or format_to_bert')
-	parser.add_argument("-map_path", default='../data/')
-	parser.add_argument("-input_file", default='../json_data/')
-	parser.add_argument("-save_path", default='../bert_data/')
-	parser.add_argument("-model_path", type=str, help="The pre-trained model path")
-	parser.add_argument('-do_basic_tokenize', default=False, action='store_true')
+	# parser.add_argument("-mode", default='../bert-base-chinese', type=str, help='format_to_lines or format_to_bert')
+	# parser.add_argument("-map_path", default='../data/')
+	parser.add_argument("--input_file", default='../data/demo_data.json')
+	parser.add_argument("--save_path", default='../data/')
+	parser.add_argument("--model_path", default='../bert-base-chinese', type=str, help="The pre-trained model path")
+	parser.add_argument('--do_basic_tokenize', default=False, action='store_true')
+	parser.add_argument('--test_data', default=False, help="whether the input is a xlsx test data")
 	# parser.add_argument("-shard_size", default=2000, type=int)
 	# parser.add_argument('-min_nsents', default=3, type=int)
 	# parser.add_argument('-max_nsents', default=100, type=int)
-	parser.add_argument('-min_src_ntokens', default=30, type=int)  # drop the segments which are shorter than min_src_ntokens
-	parser.add_argument('-max_src_ntokens', default=512, type=int)
+	parser.add_argument('--min_src_ntokens', default=30, type=int)  # drop the segments which are shorter than min_src_ntokens
+	parser.add_argument('--max_src_ntokens', default=512, type=int)
 
 	# parser.add_argument("-lower", type=str2bool, nargs='?',const=True,default=True)
 
 	parser.add_argument('-log_file', default='../../logs/cnndm.log')
 
-	parser.add_argument('-dataset', default='', help='train, valid or test, defaul will process all datasets')
+	# parser.add_argument('-dataset', default='', help='train, valid or test, defaul will process all datasets')
 
 	# parser.add_argument('-n_cpus', default=2, type=int)
 
@@ -157,20 +220,31 @@ if __name__ == '__main__':
 	# ROOT = "../data/"
 	# json_file = ROOT + "demo_data.json"
 	# target_file = ROOT + "demo_data_bertsum.train"
-	with open(args.input_file, encoding='utf-8', mode='r') as infile:
-		entity_count = {}
-		sentences_num = []
-		data = json.load(infile)
-		count = 0.
-		for each in data:
-			datasets = process_lie_segment(each, datasets, bert)
-			count += 1
-			if count >= len(data) * 0.1:
-				logger.info('Saving validation set to %s' % args.save_path)
-				torch.save(datasets, args.save_path + 'valid.data')
-				datasets = []
+	if not args.test_data:
+		with open(args.input_file, encoding='utf-8', mode='r') as infile:
+			entity_count = {}
+			sentences_num = []
+			data = json.load(infile)
+			count = 0
+			for each in data:
+				datasets = process_lie_segment(each, datasets, bert)
+				count += 1
+				if count == len(data) / 10:
+					print(count)
+					print('Saving validation set to %s' % args.save_path)
+					torch.save(datasets, args.save_path + 'valid.data')
+					datasets = []
 
-		logger.info('Saving training data to %s' % args.save_path)
-		torch.save(datasets, args.save_path + 'train.data')
-		total_num = len(datasets)
-		logger.info('Number of data :%s' % total_num)
+			print('Saving training data to %s' % args.save_path)
+			torch.save(datasets, args.save_path + 'train.data')
+			total_num = len(datasets)
+			print('Number of document: %s, Number of data :%s' % (count, total_num))
+
+	if args.test_data:
+		df = pd.read_excel(args.input_file)
+		for i in range(df.shape[0]):
+			datasets = process_lie_segment_test(df.loc[i], datasets, bert)
+			print('Saving test data to %s' % args.save_path)
+			torch.save(datasets, args.save_path + 'test.data')
+			total_num = len(datasets)
+			print('Number of document: %s, Number of data :%s' % (df.shape[1], total_num))
