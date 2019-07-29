@@ -2,9 +2,11 @@ import os
 
 import numpy as np
 import torch
+from sklearn import metrics
 from tensorboardX import SummaryWriter
 
 import bertTransformer.distributed as distributed
+from bertTransformer.models import data_loader
 # import onmt
 from bertTransformer.models.reporter import ReportMgr
 from bertTransformer.models.stats import Statistics
@@ -136,7 +138,7 @@ class Trainer(object):
 		self._start_report_manager(start_time=total_stats.start_time)
 
 		while step <= train_steps:
-
+			n_correct, n_total = 0., 0.
 			reduce_counter = 0
 			for i, batch in enumerate(train_iter):
 				if self.n_gpu == 0 or (i % self.n_gpu == self.gpu_rank):
@@ -149,8 +151,10 @@ class Trainer(object):
 						if self.n_gpu > 1:
 							normalization = sum(distributed.all_gather_list(normalization))
 
-						self._gradient_accumulation(true_batchs, normalization, total_stats,report_stats)
+						n_correct, n_total, loss_total = self._gradient_accumulation(true_batchs, normalization, total_stats,
+																		 report_stats, n_correct, n_total)
 
+						logger.info('loss:{.4f}, acc:{.4f}'.format(loss_total/n_total, n_correct/n_total))
 						report_stats = self._maybe_report_training(step, train_steps, self.optim.learning_rate, report_stats)
 
 						true_batchs = []
@@ -218,7 +222,7 @@ class Trainer(object):
 					return True
 			return False
 
-		if (not cal_lead and not cal_oracle):
+		if not cal_lead and not cal_oracle:
 			self.model.eval()
 		stats = Statistics()
 
@@ -227,6 +231,9 @@ class Trainer(object):
 		with open(can_path, 'w') as save_pred:
 			with open(gold_path, 'w') as save_gold:
 				with torch.no_grad():
+					target_all = []
+					output_all = []
+					# n_correct, n_total = 0., 0.
 					for batch in test_iter:
 						src = batch.src
 						labels = batch.labels
@@ -244,11 +251,20 @@ class Trainer(object):
 							selected_ids = [[j for j in range(batch.clss.size(1)) if labels[i][j] == 1] for i in
 											range(batch.batch_size)]
 						else:
-							sent_scores, mask = self.model(src, segs, clss, mask, mask_cls)
+							logits = self.model(src, segs, clss, mask, mask_cls)
 
-							loss = self.loss(sent_scores, labels.float())
-							loss = (loss * mask.float()).sum()
-							batch_stats = Statistics(float(loss.cpu().data.numpy()), len(labels))
+							loss = self.loss(logits, labels)  # loss = self.loss(sent_scores, labels.float())
+							# loss = (loss * mask.float()).sum()
+							# n_correct += (torch.argmax(logits, -1) == labels).sum().item()
+							# n_total += len(logits)
+							if target_all is None:
+								target_all = labels
+								output_all = logits
+							else:
+								target_all = torch.cat((target_all, labels), dim=0)
+								output_all = torch.cat((output_all, logits), dim=0)
+
+							batch_stats = Statistics(float(loss.cpu().item()), len(labels))
 							stats.update(batch_stats)
 
 							sent_scores = sent_scores + mask.float()
@@ -257,23 +273,23 @@ class Trainer(object):
 						# selected_ids = np.sort(selected_ids,1)
 						for i, idx in enumerate(selected_ids):
 							_pred = []
-							if (len(batch.src_str[i]) == 0):
+							if len(batch.src_str[i]) == 0:
 								continue
 							for j in selected_ids[i][:len(batch.src_str[i])]:
-								if (j >= len(batch.src_str[i])):
+								if j >= len(batch.src_str[i]):
 									continue
 								candidate = batch.src_str[i][j].strip()
-								if (self.args.block_trigram):
-									if (not _block_tri(candidate, _pred)):
+								if self.args.block_trigram:
+									if not _block_tri(candidate, _pred):
 										_pred.append(candidate)
 								else:
 									_pred.append(candidate)
 
-								if ((not cal_oracle) and (not self.args.recall_eval) and len(_pred) == 3):
+								if (not cal_oracle) and (not self.args.recall_eval) and len(_pred) == 3:
 									break
 
 							_pred = '<q>'.join(_pred)
-							if (self.args.recall_eval):
+							if self.args.recall_eval:
 								_pred = ' '.join(_pred.split()[:len(batch.tgt_str[i].split())])
 
 							pred.append(_pred)
@@ -283,7 +299,10 @@ class Trainer(object):
 							save_gold.write(gold[i].strip() + '\n')
 						for i in range(len(pred)):
 							save_pred.write(pred[i].strip() + '\n')
-		if (step != -1 and self.args.report_rouge):
+				pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
+														 target_names=['NEG', 'NEU', 'POS'])
+				logger.info('Prediction results: \n{}'.format(pred_res))
+		if step != -1 and self.args.report_rouge:
 			rouges = test_rouge(self.args.temp_dir, can_path, gold_path)
 			logger.info('Rouges at step %d \n%s' % (step, rouge_results_to_str(rouges)))
 		self._report_step(0, step, valid_stats=stats)
@@ -291,10 +310,10 @@ class Trainer(object):
 		return stats
 
 	def _gradient_accumulation(self, true_batchs, normalization, total_stats,
-							   report_stats):
+							   report_stats, n_correct, n_total):
 		if self.grad_accum_count > 1:
 			self.model.zero_grad()
-
+		loss_total = 0.
 		for batch in true_batchs:
 			if self.grad_accum_count == 1:
 				self.model.zero_grad()
@@ -309,6 +328,9 @@ class Trainer(object):
 			logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
 
 			loss = self.loss(logits, labels)
+			n_correct += (torch.argmax(logits, -1) == labels).sum().item()
+			n_total += len(logits)
+			loss_total += loss.item() * len(logits)
 			# loss = (loss * mask.float()).sum()
 			# (loss / loss.numel()).backward()
 			loss.backward()
@@ -341,6 +363,8 @@ class Trainer(object):
 					grads, float(1))
 			self.optim.step()
 
+		return n_correct, n_total, loss_total
+
 	def _save(self, step):
 		real_model = self.model
 		# real_generator = (self.generator.module
@@ -358,7 +382,7 @@ class Trainer(object):
 		checkpoint_path = os.path.join(self.args.model_path, 'model_step_%d.pt' % step)
 		logger.info("Saving checkpoint %s" % checkpoint_path)
 		# checkpoint_path = '%s_step_%d.pt' % (FLAGS.model_path, step)
-		if (not os.path.exists(checkpoint_path)):
+		if not os.path.exists(checkpoint_path):
 			torch.save(checkpoint, checkpoint_path)
 			return checkpoint, checkpoint_path
 

@@ -268,6 +268,16 @@ def train(args, device_id):
 	trainer = build_trainer(args, device_id, model, optim)
 	trainer.train(train_iter_fct, args.train_steps)
 
+	if args.do_eval:
+		model = trainer.model
+		model.eval()
+
+		test_iter = data_loader.Dataloader(args, load_dataset(args, 'test', shuffle=False),
+										   args.batch_size, device,
+										   shuffle=False, is_test=True)
+		trainer = build_trainer(args, device_id, model, None)
+		trainer.test(test_iter, args.train_steps)
+
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
@@ -275,6 +285,7 @@ if __name__ == '__main__':
 	parser.add_argument("-encoder", default='transformer', type=str,
 						choices=['classifier', 'transformer', 'rnn', 'baseline'])
 	parser.add_argument("-mode", default='train', type=str, choices=['train', 'validate', 'test'])
+	parser.add_argument("-do_eval", default='False', action='store_true')
 	parser.add_argument("-bert_data_path", default='../../data/BertSumvalid.data')
 	parser.add_argument("-model_path", default='../models/')
 	parser.add_argument("-result_path", default='../results/cnndm')
@@ -282,6 +293,8 @@ if __name__ == '__main__':
 	parser.add_argument("-bert_config_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese\\bert_config.json')
 
 	parser.add_argument("-batch_size", default=1000, type=int)
+	parser.add_argument("-train_steps", default=1000, type=int)
+
 	parser.add_argument("-polarities_dim", default=3, type=int, help="The dimension of the output classes")
 
 	parser.add_argument("-use_interval", type=str2bool, nargs='?', const=True, default=True)
@@ -306,7 +319,6 @@ if __name__ == '__main__':
 	parser.add_argument("-accum_count", default=1, type=int)
 	parser.add_argument("-world_size", default=1, type=int)
 	parser.add_argument("-report_every", default=1, type=int)
-	parser.add_argument("-train_steps", default=1000, type=int)
 	parser.add_argument("-recall_eval", type=str2bool, nargs='?', const=True, default=False)
 
 	parser.add_argument('-visible_gpus', default='-1', type=str)
