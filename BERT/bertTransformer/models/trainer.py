@@ -19,7 +19,7 @@ def _tally_parameters(model):
 	return n_params
 
 
-def build_trainer(args, device, model,
+def build_trainer(args, device_id, model,
 				  optim):
 	"""
     Simplify `Trainer` creation based on user `opt`s*
@@ -38,7 +38,7 @@ def build_trainer(args, device, model,
 	grad_accum_count = args.accum_count
 	n_gpu = args.world_size
 
-	if device != 'cpu':  # >= 0:
+	if device_id >= 0:  # != 'cpu':  # >= 0:
 		gpu_rank = int(args.gpu_ranks)
 	else:
 		gpu_rank = 0

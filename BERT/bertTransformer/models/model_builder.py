@@ -4,7 +4,7 @@ from pytorch_pretrained_bert import BertModel, BertConfig
 from torch.nn.init import xavier_uniform_
 
 from bertTransformer.models.encoder import TransformerInterEncoder, Classifier, RNNEncoder
-from models.optimizers import Optimizer
+from bertTransformer.models.optimizers import Optimizer
 
 
 def build_optim(args, model, checkpoint):

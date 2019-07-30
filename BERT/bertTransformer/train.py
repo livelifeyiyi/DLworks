@@ -224,18 +224,18 @@ def baseline(args, cal_lead=False, cal_oracle=False):
 		trainer.test(test_iter, 0, cal_oracle=True)
 
 
-def train(args, device):
+def train(args, device_id):
 	init_logger(args.log_file)
 
-	# device = "cpu" if args.visible_gpus == '-1' else "cuda"
-	# logger.info('Device ID %d' % device_id)
+	device = "cpu" if args.visible_gpus == '-1' else "cuda"
+	logger.info('Device ID %d' % device_id)
 	logger.info('Device %s' % device)
 	torch.manual_seed(args.seed)
 	random.seed(args.seed)
 	torch.backends.cudnn.deterministic = True
 
-	if device != 'cpu':  #device_id >= 0:
-		# torch.cuda.set_device(device_id)
+	if device_id >= 0:
+		torch.cuda.set_device(device_id)
 		torch.cuda.manual_seed(args.seed)
 
 	torch.manual_seed(args.seed)
@@ -265,7 +265,7 @@ def train(args, device):
 		optim = model_builder.build_optim(args, model, None)
 
 	logger.info(model)
-	trainer = build_trainer(args, device, model, optim)
+	trainer = build_trainer(args, device_id, model, optim)
 	trainer.train(train_dataset, device)
 
 	if args.do_test:
@@ -274,7 +274,7 @@ def train(args, device):
 		test_dataset = torch.load(args.bert_data_path + 'test.data')
 		logger.info('Loading test dataset from %s, number of examples: %d' %
 					(args.bert_data_path, len(test_dataset)))
-		trainer = build_trainer(args, device, model, None)
+		trainer = build_trainer(args, device_id, model, None)
 		trainer.test(test_dataset, device)
 
 
@@ -341,13 +341,13 @@ if __name__ == '__main__':
 	os.environ["CUDA_VISIBLE_DEVICES"] = args.visible_gpus
 
 	init_logger(args.log_file)
-	device = "cpu" if args.visible_gpus == '-1' else "cuda:%s" % args.visible_gpus
-	# device_id = 0 if device == "cuda" else -1
+	device = "cpu" if args.visible_gpus == '-1' else "cuda"
+	device_id = args.visible_gpus if device == "cuda" else -1
 
 	if args.world_size > 1:
 		multi_main(args)
 	elif args.mode == 'train':
-		train(args, device)
+		train(args, devic_id)
 	# elif args.mode == 'validate':
 	# 	wait_and_validate(args, device_id)
 	# elif (args.mode == 'lead'):
