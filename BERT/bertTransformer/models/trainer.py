@@ -91,7 +91,7 @@ class Trainer(object):
 				 report_manager=None):
 		# Basic attributes.
 		self.args = args
-		self.save_checkpoint_steps = args.save_checkpoint_steps
+		self.save_checkpoint_epochs = args.save_checkpoint_epochs
 		self.model = model
 		self.optim = optim
 		self.grad_accum_count = grad_accum_count
@@ -105,7 +105,7 @@ class Trainer(object):
 		if (model):
 			self.model.train()
 
-	def train(self, train_dataset, train_steps, device):  # , valid_iter_fct=None, valid_steps=-1)
+	def train(self, train_dataset, device):  # , valid_iter_fct=None, valid_steps=-1)
 		"""
         The main training loops.
         by iterating over training data (i.e. `train_iter_fct`)
@@ -124,7 +124,8 @@ class Trainer(object):
 		logger.info('Start training...')
 
 		# step =  self.optim._step + 1
-		step = self.optim._step + 1
+		# step = self.optim._step + 1
+		epoch = 0
 		true_batchs = []
 		accum = 0
 		normalization = 0
@@ -133,14 +134,18 @@ class Trainer(object):
 		total_stats = Statistics()
 		report_stats = Statistics()
 		self._start_report_manager(start_time=total_stats.start_time)
+		if self.args.do_eval:
+			test_dataset = torch.load(self.args.bert_data_path + 'test.data')
+			logger.info('Loading test dataset from %s, number of examples: %d' %
+			            (self.args.bert_data_path, len(test_dataset)))
 
-		while step <= train_steps:
+		while epoch <= self.args.train_epochs:
 			n_correct, n_total = 0., 0.
 			reduce_counter = 0
 			loss_total = 0
 			mini_batches = get_minibatches(train_dataset, self.args.batch_size, device)
-			for i, batch in enumerate(mini_batches):
-				if self.n_gpu == 0 or (i % self.n_gpu == self.gpu_rank):
+			for step, batch in enumerate(mini_batches):
+				if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
 
 					# true_batchs.append(batch)
 					# normalization += batch.batch_size
@@ -197,20 +202,22 @@ class Trainer(object):
 
 				# return n_correct, n_total, loss_total
 
-				logger.info('loss:{:.4f}, acc:{:.4f}'.format(loss_total/n_total, n_correct/n_total))
-				report_stats = self._maybe_report_training(step, train_steps, self.optim.learning_rate, report_stats)
-
+				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total/n_total, n_correct/n_total))
+				report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
+			if self.args.do_eval:
+				# model = trainer.model
+				self.model.eval()
+				# trainer = build_trainer(args, device_id, model, None)
+				self.test(self.model, test_dataset, epoch, device)
 				# true_batchs = []
 				# accum = 0
 				# normalization = 0
-				# if step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
-				# 	self._save(step)
-				#
 				# step += 1
 				# if step > train_steps:
 				# 	break
 
-
+		if epoch % self.save_checkpoint_epochs == 0 and self.gpu_rank == 0:
+			self._save(epoch)
 		# return total_stats
 
 	def validate(self, valid_iter, step=0):
@@ -241,7 +248,7 @@ class Trainer(object):
 			self._report_step(0, step, valid_stats=stats)
 			return stats
 
-	def test(self, test_dataset, step, device, cal_lead=False, cal_oracle=False):
+	def test(self, model, test_dataset, step, device, cal_lead=False, cal_oracle=False):
 		""" Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -266,7 +273,7 @@ class Trainer(object):
 			return False
 
 		if not cal_lead and not cal_oracle:
-			self.model.eval()
+			model.eval()
 		stats = Statistics()
 
 		can_path = '%s_step%d.candidate' % (self.args.result_path, step)
@@ -295,7 +302,7 @@ class Trainer(object):
 							selected_ids = [[j for j in range(batch.clss.size(1)) if labels[i][j] == 1] for i in
 											range(batch.batch_size)]
 						else:
-							logits = self.model(src, segs, clss, mask, mask_cls)
+							logits = model(src, segs, clss, mask, mask_cls)
 
 							loss = self.loss(logits, labels)  # loss = self.loss(sent_scores, labels.float())
 							# loss = (loss * mask.float()).sum()
@@ -345,7 +352,7 @@ class Trainer(object):
 							save_pred.write(pred[i].strip() + '\n')
 				pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
 														 target_names=['NEG', 'NEU', 'POS'])
-				logger.info('Prediction results: \n{}'.format(pred_res))
+				logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
 		if step != -1 and self.args.report_rouge:
 			rouges = test_rouge(self.args.temp_dir, can_path, gold_path)
 			logger.info('Rouges at step %d \n%s' % (step, rouge_results_to_str(rouges)))
