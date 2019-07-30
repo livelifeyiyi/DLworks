@@ -235,8 +235,8 @@ class Trainer(object):
 				# if step > train_steps:
 				# 	break
 
-		if epoch % self.save_checkpoint_epochs == 0 and self.gpu_rank == 0:
-			self._save(epoch)
+			if step % self.save_checkpoint_epochs == 0 and self.gpu_rank == 0:
+				self._save(epoch, step)
 		# return total_stats
 
 	def validate(self, valid_iter, step=0):
@@ -435,7 +435,7 @@ class Trainer(object):
 
 		return n_correct, n_total, loss_total
 
-	def _save(self, step):
+	def _save(self, epoch, step):
 		real_model = self.model
 		# real_generator = (self.generator.module
 		#                   if isinstance(self.generator, torch.nn.DataParallel)
@@ -449,7 +449,7 @@ class Trainer(object):
 			'opt': self.args,
 			'optim': self.optim,
 		}
-		checkpoint_path = os.path.join(self.args.model_path, 'model_step_%d.pt' % step)
+		checkpoint_path = os.path.join(self.args.model_path, 'model_epoch_%d_step_%d.pt' % (epoch, step))
 		logger.info("Saving checkpoint %s" % checkpoint_path)
 		# checkpoint_path = '%s_step_%d.pt' % (FLAGS.model_path, step)
 		if not os.path.exists(checkpoint_path):
