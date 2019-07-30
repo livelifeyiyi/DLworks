@@ -91,7 +91,7 @@ class Trainer(object):
 				 report_manager=None):
 		# Basic attributes.
 		self.args = args
-		self.save_checkpoint_epochs = args.save_checkpoint_epochs
+		self.save_checkpoint_steps = args.save_checkpoint_steps
 		self.model = model
 		self.optim = optim
 		self.grad_accum_count = grad_accum_count
@@ -121,8 +121,6 @@ class Trainer(object):
         Return:
             None
         """
-		logger.info('Start training...')
-
 		# step =  self.optim._step + 1
 		# step = self.optim._step + 1
 		# epoch = 0
@@ -143,8 +141,10 @@ class Trainer(object):
 			n_correct, n_total = 0., 0.
 			reduce_counter = 0
 			loss_total = 0
-
+			logger.info('Getting minibatches')
 			mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
+			logger.info('Number of minibatches: %s' % len(train_dataset) // self.args.batch_size)
+			logger.info('Start training...')
 			for step, batch in enumerate(mini_batches):
 				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
 
@@ -208,6 +208,9 @@ class Trainer(object):
 							grads, float(1))
 					self.optim.step()
 
+				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total / n_total, n_correct / n_total))
+				report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
+
 				# in case of multi step gradient accumulation,
 				# update only after accum batches
 			if self.grad_accum_count > 1:
@@ -221,8 +224,6 @@ class Trainer(object):
 
 			# return n_correct, n_total, loss_total
 
-			logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total/n_total, n_correct/n_total))
-			report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
 			if self.args.do_eval:
 				# model = trainer.model
 				self.model.eval()
@@ -235,8 +236,8 @@ class Trainer(object):
 				# if step > train_steps:
 				# 	break
 
-		if epoch % self.save_checkpoint_epochs == 0 and self.gpu_rank == 0:
-			self._save(epoch)
+			if step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
+				self._save(epoch, step)
 		# return total_stats
 
 	def validate(self, valid_iter, step=0):
@@ -435,7 +436,7 @@ class Trainer(object):
 
 		return n_correct, n_total, loss_total
 
-	def _save(self, step):
+	def _save(self, epoch, step):
 		real_model = self.model
 		# real_generator = (self.generator.module
 		#                   if isinstance(self.generator, torch.nn.DataParallel)
@@ -449,7 +450,7 @@ class Trainer(object):
 			'opt': self.args,
 			'optim': self.optim,
 		}
-		checkpoint_path = os.path.join(self.args.model_path, 'model_step_%d.pt' % step)
+		checkpoint_path = os.path.join(self.args.model_path, 'model_epoch_%d_step_%d.pt' % (epoch, step))
 		logger.info("Saving checkpoint %s" % checkpoint_path)
 		# checkpoint_path = '%s_step_%d.pt' % (FLAGS.model_path, step)
 		if not os.path.exists(checkpoint_path):
