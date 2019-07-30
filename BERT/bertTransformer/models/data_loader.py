@@ -285,10 +285,10 @@ def _pad(data, pad_id, width=-1):
 		width = max(len(d) for d in data)
 	# rtn_data = [d + [pad_id] * (width - len(d)) for d in data]
 	rtn_data = data + [pad_id] * (width-len(data))
-	return np.array(rtn_data)
+	return rtn_data
 
 
-def preprocess(ex, device, max_seq_length, max_cls):
+def preprocess(ex, max_seq_length, max_cls):
 	src = ex['src']
 	if ('labels' in ex):
 		labels = ex['labels']
@@ -304,14 +304,14 @@ def preprocess(ex, device, max_seq_length, max_cls):
 	src = _pad(src, 0, max_seq_length)  # torch.tensor().to(device)
 	# labels = torch.tensor(labels).to(device)
 	segs = _pad(segs, 0, max_seq_length)  # torch.tensor().to(device)
-	clss = _pad(clss, -1, max_cls)  # torch.tensor().to(device)
-	mask = 1 - (src == 0)
-	mask_cls = 1 - (clss == -1)
+	# clss = _pad(clss, -1, max_cls)  # torch.tensor().to(device)
+	# mask = [(1 - (i == 0)) for i in src]
+	# mask_cls = [(1 - (i == -1)) for i in clss]
 	# clss[clss == -1] = 0
-	return [src, labels, segs, clss, mask, mask_cls]
+	return [src, labels, segs, clss]
 
 
-def get_minibatches(data_dict, minibatch_size, device, max_seq_length, shuffle=True):
+def get_minibatches(data_dict, minibatch_size, max_seq_length, shuffle=True):
 	"""
 	Iterates through the provided data one minibatch at at time. You can use this function to
 	iterate through data in minibatches as follows:
@@ -334,15 +334,15 @@ def get_minibatches(data_dict, minibatch_size, device, max_seq_length, shuffle=T
 			  (e.g., features and labels) at the same time.
 	"""
 	data = []
-	max_cls = 0
-	for ex in data_dict:
-		cls_lenth = len(ex['clss'])
-		if cls_lenth > max_cls:
-			max_cls = cls_lenth
+	# max_cls = 0
+	# for ex in data_dict:
+	# 	cls_lenth = len(ex['clss'])
+	# 	if cls_lenth > max_cls:
+	# 		max_cls = cls_lenth
 	for ex in data_dict:
 		if len(ex['src']) == 0:
 			continue
-		ex = preprocess(ex, device, max_seq_length, max_cls)
+		ex = preprocess(ex, max_seq_length, max_cls=0)
 		if ex is None:
 			continue
 		data.append(ex)
@@ -354,7 +354,7 @@ def get_minibatches(data_dict, minibatch_size, device, max_seq_length, shuffle=T
 		np.random.shuffle(indices)
 	for minibatch_start in np.arange(0, data_size, minibatch_size):
 		minibatch_indices = indices[minibatch_start:minibatch_start + minibatch_size]
-		yield minibatch(data, minibatch_indices) # [minibatch(d, minibatch_indices) for d in data] if list_data \
+		yield minibatch(data, minibatch_indices)  # [minibatch(d, minibatch_indices) for d in data] if list_data \
 
 
 def minibatch(data, minibatch_idx):

@@ -4,7 +4,7 @@ from pytorch_pretrained_bert import BertModel, BertConfig
 from torch.nn.init import xavier_uniform_
 
 from bertTransformer.models.encoder import TransformerInterEncoder, Classifier, RNNEncoder
-from bertTransformer.models.optimizers import Optimizer
+from models.optimizers import Optimizer
 
 
 def build_optim(args, model, checkpoint):
@@ -94,4 +94,4 @@ class Summarizer(nn.Module):
 		sents_vec = sents_vec * mask_cls[:, :, None].float()  # (batch_size, sentences_num, 768)
 		# sent_scores = self.encoder(sents_vec, mask_cls).squeeze(-1)  # (batch_size, sentences_num)
 		logits = self.encoder(sents_vec, mask_cls)  # (batch_size, class_num)
-		return logits  # sent_scores, mask_cls
+		return logits  # , mask_cls

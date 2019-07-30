@@ -19,7 +19,7 @@ def _tally_parameters(model):
 	return n_params
 
 
-def build_trainer(args, device_id, model,
+def build_trainer(args, device, model,
 				  optim):
 	"""
     Simplify `Trainer` creation based on user `opt`s*
@@ -33,13 +33,13 @@ def build_trainer(args, device_id, model,
         model_saver(:obj:`onmt.models.ModelSaverBase`): the utility object
             used to save the model
     """
-	device = "cpu" if args.visible_gpus == '-1' else "cuda"
+	# device = "cpu" if args.visible_gpus == '-1' else "cuda"
 
 	grad_accum_count = args.accum_count
 	n_gpu = args.world_size
 
-	if device_id >= 0:
-		gpu_rank = int(args.gpu_ranks[device_id])
+	if device != 'cpu':  # >= 0:
+		gpu_rank = int(args.gpu_ranks)
 	else:
 		gpu_rank = 0
 		n_gpu = 0
@@ -144,9 +144,9 @@ class Trainer(object):
 			reduce_counter = 0
 			loss_total = 0
 
-			mini_batches = get_minibatches(train_dataset, self.args.batch_size, device, self.args.max_seq_length)
+			mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
 			for step, batch in enumerate(mini_batches):
-				if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
+				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
 
 					# true_batchs.append(batch)
 					# normalization += batch.batch_size
@@ -155,50 +155,41 @@ class Trainer(object):
 					# 	reduce_counter += 1
 					# 	if self.n_gpu > 1:
 					# 		normalization = sum(distributed.all_gather_list(normalization))
-					src, labels, segs, clss, mask, mask_cls = batch[0], batch[1], batch[2], batch[3], batch[4], batch[5]
-					src = torch.LongTensor(src).to(device)
-					labels = torch.LongTensor(labels).to(device)
-					segs = torch.LongTensor(segs).to(device)
-					clss = torch.LongTensor(clss).to(device)
-					mask = torch.LongTensor(mask).to(device)
-					mask_cls = torch.LongTensor(mask_cls).to(device)
-					# src = batch.src
-					# labels = batch.labels
-					# segs = batch.segs
-					# clss = batch.clss
-					# mask = batch.mask
-					# mask_cls = batch.mask_cls
+				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
+				src = torch.LongTensor(src).to(device)  		# .reshape(-1, self.args.max_seq_length)
+				labels = torch.LongTensor(labels).to(device)  	# .reshape(1, -1)
+				segs = torch.LongTensor(segs).to(device)		# .reshape(1, -1)
 
-					logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
+				clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+				clss = torch.LongTensor(clss).to(device)
+				mask = torch.ByteTensor((1 - (src == 0))).to(device)
+				mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
+				# src = batch.src
+				# labels = batch.labels
+				# segs = batch.segs
+				# clss = batch.clss
+				# mask = batch.mask
+				# mask_cls = batch.mask_cls
 
-					loss = self.loss(logits, labels)
-					n_correct += (torch.argmax(logits, -1) == labels).sum().item()
-					n_total += len(logits)
-					loss_total += loss.item() * len(logits)
-					# loss = (loss * mask.float()).sum()
-					# (loss / loss.numel()).backward()
-					loss.backward()
-					# loss.div(float(normalization)).backward()
+				logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
 
-					batch_stats = Statistics(float(loss.cpu().item()), normalization)
+				loss = self.loss(logits, labels)
+				n_correct += (torch.argmax(logits, -1) == labels).sum().item()
+				n_total += len(logits)
+				loss_total += loss.item() * len(logits)
+				# loss = (loss * mask.float()).sum()
+				# (loss / loss.numel()).backward()
+				loss.backward()
+				# loss.div(float(normalization)).backward()
 
-					total_stats.update(batch_stats)
-					report_stats.update(batch_stats)
+				batch_stats = Statistics(float(loss.cpu().item()), normalization)
 
-					# 4. Update the parameters and statistics.
-					if self.grad_accum_count == 1:
-						# Multi GPU gradient gather
-						if self.n_gpu > 1:
-							grads = [p.grad.data for p in self.model.parameters()
-									 if p.requires_grad
-									 and p.grad is not None]
-							distributed.all_reduce_and_rescale_tensors(
-								grads, float(1))
-						self.optim.step()
+				total_stats.update(batch_stats)
+				report_stats.update(batch_stats)
 
-					# in case of multi step gradient accumulation,
-					# update only after accum batches
-				if self.grad_accum_count > 1:
+				# 4. Update the parameters and statistics.
+				if self.grad_accum_count == 1:
+					# Multi GPU gradient gather
 					if self.n_gpu > 1:
 						grads = [p.grad.data for p in self.model.parameters()
 								 if p.requires_grad
@@ -207,10 +198,21 @@ class Trainer(object):
 							grads, float(1))
 					self.optim.step()
 
-				# return n_correct, n_total, loss_total
+				# in case of multi step gradient accumulation,
+				# update only after accum batches
+			if self.grad_accum_count > 1:
+				if self.n_gpu > 1:
+					grads = [p.grad.data for p in self.model.parameters()
+							 if p.requires_grad
+							 and p.grad is not None]
+					distributed.all_reduce_and_rescale_tensors(
+						grads, float(1))
+				self.optim.step()
 
-				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total/n_total, n_correct/n_total))
-				report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
+			# return n_correct, n_total, loss_total
+
+			logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total/n_total, n_correct/n_total))
+			report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
 			if self.args.do_eval:
 				# model = trainer.model
 				self.model.eval()
@@ -291,7 +293,7 @@ class Trainer(object):
 					target_all = []
 					output_all = []
 					# n_correct, n_total = 0., 0.
-					mini_batches = get_minibatches(test_dataset, self.args.batch_size, device, self.args.max_seq_length)
+					mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length)
 					for i, batch in enumerate(mini_batches):
 						src = batch.src
 						labels = batch.labels
