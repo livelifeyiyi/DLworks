@@ -138,7 +138,7 @@ class Trainer(object):
 			n_correct, n_total = 0., 0.
 			reduce_counter = 0
 			loss_total = 0
-			mini_batches = get_minibatches(train_dataset, self.args.batch_size, device)
+			mini_batches = get_minibatches(train_dataset, self.args.batch_size, device, self.args.max_seq_length)
 			for i, batch in enumerate(mini_batches):
 				if self.n_gpu == 0 or (i % self.n_gpu == self.gpu_rank):
 

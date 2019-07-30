@@ -16,7 +16,7 @@ from pytorch_pretrained_bert import BertConfig
 
 import bertTransformer.distributed as distributed
 from bertTransformer.models import data_loader, model_builder
-from bertTransformer.models.data_loader import load_dataset
+# from bertTransformer.models.data_loader import load_dataset
 from bertTransformer.models.model_builder import Summarizer
 from bertTransformer.models.trainer import build_trainer
 from bertTransformer.others.logging import logger, init_logger
