@@ -279,26 +279,37 @@ from bertTransformer.others.logging import logger
 # 			yield batch
 
 
-def preprocess(ex, device):
+def _pad(data, pad_id, width=-1):
+	if (width == -1):
+		width = max(len(d) for d in data)
+	rtn_data = [d + [pad_id] * (width - len(d)) for d in data]
+	return rtn_data
+
+
+def preprocess(ex, device, max_seq_length):
 	src = ex['src']
 	if ('labels' in ex):
 		labels = ex['labels']
 	else:
 		labels = ex['src_sent_labels']
-
 	segs = ex['segs']
 	# if (not self.args.use_interval):
 	# 	segs = [0] * len(segs)
 	clss = ex['clss']
 	src_txt = ex['src_txt']
 	# tgt_txt = ex['tgt_txt']
+	
+	src = torch.tensor(_pad(src, 0, max_seq_length)).to(device)
+	labels = torch.tensor(labels).to(device)
+	segs = torch.tensor(_pad(segs, 0, max_seq_length)).to(device)
+	clss = torch.tensor(_pad(clss, -1)).to(device)
 	mask = 1 - (src == 0)
 	mask_cls = 1 - (clss == -1)
 	# clss[clss == -1] = 0
-	return src.to(device), labels.to(device), segs.to(device), clss.to(device), mask.to(device), mask_cls.to(device)
+	return src, labels, segs, clss, mask.to(device), mask_cls.to(device)
 
 
-def get_minibatches(data, minibatch_size, device, shuffle=True):
+def get_minibatches(data, minibatch_size, device, max_seq_length, shuffle=True):
 	"""
 	Iterates through the provided data one minibatch at at time. You can use this function to
 	iterate through data in minibatches as follows:
@@ -324,7 +335,7 @@ def get_minibatches(data, minibatch_size, device, shuffle=True):
 	for ex in data:
 		if len(ex['src']) == 0:
 			continue
-		ex = preprocess(ex, device)
+		ex = preprocess(ex, device, max_seq_length)
 		if ex is None:
 			continue
 		data_list.append(ex)
