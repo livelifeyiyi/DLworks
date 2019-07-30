@@ -143,7 +143,7 @@ class Trainer(object):
 			loss_total = 0
 			logger.info('Getting minibatches')
 			mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
-			logger.info('Number of minibatches: %s' % len(train_dataset) // self.args.batch_size)
+			logger.info('Number of minibatches: %s' % (len(train_dataset) // self.args.batch_size))
 			logger.info('Start training...')
 			for step, batch in enumerate(mini_batches):
 				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
@@ -209,10 +209,13 @@ class Trainer(object):
 					self.optim.step()
 
 				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total / n_total, n_correct / n_total))
-				report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
+				if step != 0 and step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
+					self._save(epoch, step)
+				# report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
 
 				# in case of multi step gradient accumulation,
 				# update only after accum batches
+			self._save(epoch, step)
 			if self.grad_accum_count > 1:
 				if self.n_gpu > 1:
 					grads = [p.grad.data for p in self.model.parameters()
@@ -236,11 +239,9 @@ class Trainer(object):
 				# if step > train_steps:
 				# 	break
 
-			if step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
-				self._save(epoch, step)
 		# return total_stats
 
-	def validate(self, valid_iter, step=0):
+	def validate(self, valid_dataset, device, step=0):
 		""" Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -251,19 +252,34 @@ class Trainer(object):
 		stats = Statistics()
 
 		with torch.no_grad():
-			for batch in valid_iter:
-				src = batch.src
-				labels = batch.labels
-				segs = batch.segs
-				clss = batch.clss
-				mask = batch.mask
-				mask_cls = batch.mask_cls
+			mini_batches = get_minibatches(valid_dataset, self.args.batch_size, self.args.max_seq_length)
+			logger.info('Number of minibatches: %s' % (len(valid_dataset) // self.args.batch_size))
+			for step, batch in enumerate(mini_batches):
+				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
+				if torch.cuda.is_available():
+					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.cuda.LongTensor(segs).to(device)  # .reshape(1, -1)
 
-				sent_scores, mask = self.model(src, segs, clss, mask, mask_cls)
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.cuda.LongTensor(clss).to(device)
+					mask = torch.cuda.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.cuda.ByteTensor((1 - (clss == -1)))
+				else:
+					src = torch.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.LongTensor(segs).to(device)  # .reshape(1, -1)
 
-				loss = self.loss(sent_scores, labels.float())
-				loss = (loss * mask.float()).sum()
-				batch_stats = Statistics(float(loss.cpu().data.numpy()), len(labels))
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.LongTensor(clss).to(device)
+					mask = torch.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
+
+				logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
+
+				loss = self.loss(logits, labels)
+				# loss = (loss * mask.float()).sum()
+				batch_stats = Statistics(float(loss.cpu().item()), len(labels))
 				stats.update(batch_stats)
 			self._report_step(0, step, valid_stats=stats)
 			return stats
@@ -274,111 +290,160 @@ class Trainer(object):
         Returns:
             :obj:`nmt.Statistics`: validation loss statistics
         """
-
-		# Set model in validating mode.
-		def _get_ngrams(n, text):
-			ngram_set = set()
-			text_length = len(text)
-			max_index_ngram_start = text_length - n
-			for i in range(max_index_ngram_start + 1):
-				ngram_set.add(tuple(text[i:i + n]))
-			return ngram_set
-
-		def _block_tri(c, p):
-			tri_c = _get_ngrams(3, c.split())
-			for s in p:
-				tri_s = _get_ngrams(3, s.split())
-				if len(tri_c.intersection(tri_s)) > 0:
-					return True
-			return False
-
-		if not cal_lead and not cal_oracle:
-			model.eval()
+		model.eval()
 		stats = Statistics()
+		mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length)
+		logger.info('Number of minibatches: %s' % (len(test_dataset) // self.args.batch_size))
+		with torch.no_grad():
+			target_all = []
+			output_all = []
+			for step, batch in enumerate(mini_batches):
+				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
+				if torch.cuda.is_available():
+					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.cuda.LongTensor(segs).to(device)  # .reshape(1, -1)
 
-		can_path = '%s_step%d.candidate' % (self.args.result_path, step)
-		gold_path = '%s_step%d.gold' % (self.args.result_path, step)
-		with open(can_path, 'w') as save_pred:
-			with open(gold_path, 'w') as save_gold:
-				with torch.no_grad():
-					target_all = []
-					output_all = []
-					# n_correct, n_total = 0., 0.
-					mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length)
-					for i, batch in enumerate(mini_batches):
-						src = batch.src
-						labels = batch.labels
-						segs = batch.segs
-						clss = batch.clss
-						mask = batch.mask
-						mask_cls = batch.mask_cls
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.cuda.LongTensor(clss).to(device)
+					mask = torch.cuda.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.cuda.ByteTensor((1 - (clss == -1)))
+				else:
+					src = torch.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.LongTensor(segs).to(device)  # .reshape(1, -1)
 
-						gold = []
-						pred = []
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.LongTensor(clss).to(device)
+					mask = torch.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
 
-						if (cal_lead):
-							selected_ids = [list(range(batch.clss.size(1)))] * batch.batch_size
-						elif (cal_oracle):
-							selected_ids = [[j for j in range(batch.clss.size(1)) if labels[i][j] == 1] for i in
-											range(batch.batch_size)]
-						else:
-							logits = model(src, segs, clss, mask, mask_cls)
+				logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
+				loss = self.loss(logits, labels)
+				if target_all is None:
+					target_all = labels
+					output_all = logits
+				else:
+					target_all = torch.cat((target_all, labels), dim=0)
+					output_all = torch.cat((output_all, logits), dim=0)
 
-							loss = self.loss(logits, labels)  # loss = self.loss(sent_scores, labels.float())
-							# loss = (loss * mask.float()).sum()
-							# n_correct += (torch.argmax(logits, -1) == labels).sum().item()
-							# n_total += len(logits)
-							if target_all is None:
-								target_all = labels
-								output_all = logits
+				batch_stats = Statistics(float(loss.cpu().item()), len(labels))
+				stats.update(batch_stats)
+
+				# sent_scores = sent_scores + mask.float()
+				# sent_scores = sent_scores.cpu().data.numpy()
+				# selected_ids = np.argsort(-sent_scores, 1)
+
+			pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
+												 target_names=['NEG', 'NEU', 'POS'])
+			logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
+			self._report_step(0, step, valid_stats=stats)
+
+		def orig():
+			# Set model in validating mode.
+			def _get_ngrams(n, text):
+				ngram_set = set()
+				text_length = len(text)
+				max_index_ngram_start = text_length - n
+				for i in range(max_index_ngram_start + 1):
+					ngram_set.add(tuple(text[i:i + n]))
+				return ngram_set
+
+			def _block_tri(c, p):
+				tri_c = _get_ngrams(3, c.split())
+				for s in p:
+					tri_s = _get_ngrams(3, s.split())
+					if len(tri_c.intersection(tri_s)) > 0:
+						return True
+				return False
+
+			if not cal_lead and not cal_oracle:
+				model.eval()
+			stats = Statistics()
+
+			can_path = '%s_step%d.candidate' % (self.args.result_path, step)
+			gold_path = '%s_step%d.gold' % (self.args.result_path, step)
+			with open(can_path, 'w') as save_pred:
+				with open(gold_path, 'w') as save_gold:
+					with torch.no_grad():
+						target_all = []
+						output_all = []
+						# n_correct, n_total = 0., 0.
+						mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length)
+						for i, batch in enumerate(mini_batches):
+							src = batch.src
+							labels = batch.labels
+							segs = batch.segs
+							clss = batch.clss
+							mask = batch.mask
+							mask_cls = batch.mask_cls
+
+							gold = []
+							pred = []
+
+							if (cal_lead):
+								selected_ids = [list(range(batch.clss.size(1)))] * batch.batch_size
+							elif (cal_oracle):
+								selected_ids = [[j for j in range(batch.clss.size(1)) if labels[i][j] == 1] for i in
+												range(batch.batch_size)]
 							else:
-								target_all = torch.cat((target_all, labels), dim=0)
-								output_all = torch.cat((output_all, logits), dim=0)
+								logits = model(src, segs, clss, mask, mask_cls)
 
-							batch_stats = Statistics(float(loss.cpu().item()), len(labels))
-							stats.update(batch_stats)
-
-							sent_scores = sent_scores + mask.float()
-							sent_scores = sent_scores.cpu().data.numpy()
-							selected_ids = np.argsort(-sent_scores, 1)
-						# selected_ids = np.sort(selected_ids,1)
-						for i, idx in enumerate(selected_ids):
-							_pred = []
-							if len(batch.src_str[i]) == 0:
-								continue
-							for j in selected_ids[i][:len(batch.src_str[i])]:
-								if j >= len(batch.src_str[i]):
-									continue
-								candidate = batch.src_str[i][j].strip()
-								if self.args.block_trigram:
-									if not _block_tri(candidate, _pred):
-										_pred.append(candidate)
+								loss = self.loss(logits, labels)  # loss = self.loss(sent_scores, labels.float())
+								# loss = (loss * mask.float()).sum()
+								# n_correct += (torch.argmax(logits, -1) == labels).sum().item()
+								# n_total += len(logits)
+								if target_all is None:
+									target_all = labels
+									output_all = logits
 								else:
-									_pred.append(candidate)
+									target_all = torch.cat((target_all, labels), dim=0)
+									output_all = torch.cat((output_all, logits), dim=0)
 
-								if (not cal_oracle) and (not self.args.recall_eval) and len(_pred) == 3:
-									break
+								batch_stats = Statistics(float(loss.cpu().item()), len(labels))
+								stats.update(batch_stats)
 
-							_pred = '<q>'.join(_pred)
-							if self.args.recall_eval:
-								_pred = ' '.join(_pred.split()[:len(batch.tgt_str[i].split())])
+								sent_scores = sent_scores + mask.float()
+								sent_scores = sent_scores.cpu().data.numpy()
+								selected_ids = np.argsort(-sent_scores, 1)
+							# selected_ids = np.sort(selected_ids,1)
+							for i, idx in enumerate(selected_ids):
+								_pred = []
+								if len(batch.src_str[i]) == 0:
+									continue
+								for j in selected_ids[i][:len(batch.src_str[i])]:
+									if j >= len(batch.src_str[i]):
+										continue
+									candidate = batch.src_str[i][j].strip()
+									if self.args.block_trigram:
+										if not _block_tri(candidate, _pred):
+											_pred.append(candidate)
+									else:
+										_pred.append(candidate)
 
-							pred.append(_pred)
-							gold.append(batch.tgt_str[i])
+									if (not cal_oracle) and (not self.args.recall_eval) and len(_pred) == 3:
+										break
 
-						for i in range(len(gold)):
-							save_gold.write(gold[i].strip() + '\n')
-						for i in range(len(pred)):
-							save_pred.write(pred[i].strip() + '\n')
-				pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
-														 target_names=['NEG', 'NEU', 'POS'])
-				logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
-		if step != -1 and self.args.report_rouge:
-			rouges = test_rouge(self.args.temp_dir, can_path, gold_path)
-			logger.info('Rouges at step %d \n%s' % (step, rouge_results_to_str(rouges)))
-		self._report_step(0, step, valid_stats=stats)
+								_pred = '<q>'.join(_pred)
+								if self.args.recall_eval:
+									_pred = ' '.join(_pred.split()[:len(batch.tgt_str[i].split())])
 
-		return stats
+								pred.append(_pred)
+								gold.append(batch.tgt_str[i])
+
+							for i in range(len(gold)):
+								save_gold.write(gold[i].strip() + '\n')
+							for i in range(len(pred)):
+								save_pred.write(pred[i].strip() + '\n')
+					pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
+															 target_names=['NEG', 'NEU', 'POS'])
+					logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
+			if step != -1 and self.args.report_rouge:
+				rouges = test_rouge(self.args.temp_dir, can_path, gold_path)
+				logger.info('Rouges at step %d \n%s' % (step, rouge_results_to_str(rouges)))
+			self._report_step(0, step, valid_stats=stats)
+
+			return stats
 
 	def _gradient_accumulation(self, true_batchs, normalization, total_stats,
 							   report_stats, n_correct, n_total):

@@ -172,16 +172,14 @@ def validate(args, device_id, pt, step):
 			setattr(args, k, opt[k])
 	print(args)
 
-	config = BertConfig.from_json_file(args.bert_config_path)
+	config = BertConfig.from_json_file(args.bert_config_name)
 	model = Summarizer(args, device, load_pretrained_bert=False, bert_config=config)
 	model.load_cp(checkpoint)
 	model.eval()
+	valid_dataset = torch.load(args.bert_data_path + 'train.data')
 
-	valid_iter = data_loader.Dataloader(args, load_dataset(args, 'valid', shuffle=False),
-										args.batch_size, device,
-										shuffle=False, is_test=False)
 	trainer = build_trainer(args, device_id, model, None)
-	stats = trainer.validate(valid_iter, step)
+	stats = trainer.validate(valid_dataset, step)
 	return stats.xent()
 
 
@@ -289,8 +287,8 @@ if __name__ == '__main__':
 	parser.add_argument("--bert_data_path", default='../data/')
 	parser.add_argument("--model_path", default='../models/')
 	parser.add_argument("--result_path", default='../results/cnndm')
-	parser.add_argument("--temp_dir", default='../bert-base-chinese', help='pre-trained bert model')
-	parser.add_argument("--bert_config_path", default='../bert-base-chinese/bert_config.json')
+	parser.add_argument("--pretrained_dir", default='../bert-base-chinese', help='pre-trained bert model')
+	parser.add_argument("--bert_config", default='bert_config.json')
 
 	parser.add_argument("--batch_size", default=3, type=int)
 	parser.add_argument("--train_epochs", default=3, type=int)
@@ -347,8 +345,8 @@ if __name__ == '__main__':
 		multi_main(args)
 	elif args.mode == 'train':
 		train(args, device_id)
-	# elif args.mode == 'validate':
-	# 	wait_and_validate(args, device_id)
+	elif args.mode == 'validate':
+		wait_and_validate(args, device_id)
 	# elif (args.mode == 'lead'):
 	# 	baseline(args, cal_lead=True)
 	# elif (args.mode == 'oracle'):
