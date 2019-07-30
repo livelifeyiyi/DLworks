@@ -38,11 +38,11 @@ def build_trainer(args, device_id, model,
 	grad_accum_count = args.accum_count
 	n_gpu = args.world_size
 
-	if device_id >= 0:  # != 'cpu':  # >= 0:
-		gpu_rank = int(args.gpu_ranks)
-	else:
-		gpu_rank = 0
-		n_gpu = 0
+	# if device_id >= 0:  # != 'cpu':  # >= 0:
+	# 	gpu_rank = int(args.gpu_ranks)
+	# else:
+	gpu_rank = 0
+	n_gpu = 0
 
 	print('gpu_rank %d' % gpu_rank)
 
@@ -156,14 +156,24 @@ class Trainer(object):
 					# 	if self.n_gpu > 1:
 					# 		normalization = sum(distributed.all_gather_list(normalization))
 				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
-				src = torch.LongTensor(src).to(device)  		# .reshape(-1, self.args.max_seq_length)
-				labels = torch.LongTensor(labels).to(device)  	# .reshape(1, -1)
-				segs = torch.LongTensor(segs).to(device)		# .reshape(1, -1)
+				if torch.cuda.is_available():
+					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.cuda.LongTensor(segs).to(device)  # .reshape(1, -1)
 
-				clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
-				clss = torch.LongTensor(clss).to(device)
-				mask = torch.ByteTensor((1 - (src == 0))).to(device)
-				mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.cuda.LongTensor(clss).to(device)
+					mask = torch.cuda.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.cuda.ByteTensor((1 - (clss == -1)))
+				else:
+					src = torch.LongTensor(src).to(device)  		# .reshape(-1, self.args.max_seq_length)
+					labels = torch.LongTensor(labels).to(device)  	# .reshape(1, -1)
+					segs = torch.LongTensor(segs).to(device)		# .reshape(1, -1)
+
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.LongTensor(clss).to(device)
+					mask = torch.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
 				# src = batch.src
 				# labels = batch.labels
 				# segs = batch.segs
