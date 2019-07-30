@@ -266,35 +266,48 @@ def train(args, device_id):
 
 	logger.info(model)
 	trainer = build_trainer(args, device_id, model, optim)
-	trainer.train(train_dataset, args.train_steps, device)
+	trainer.train(train_dataset, device)
 
-	if args.do_eval:
+	if args.do_test:
 		model = trainer.model
 		model.eval()
 		test_dataset = torch.load(args.bert_data_path + 'test.data')
 		logger.info('Loading test dataset from %s, number of examples: %d' %
 					(args.bert_data_path, len(test_dataset)))
 		trainer = build_trainer(args, device_id, model, None)
-		trainer.test(test_dataset, args.train_steps, device)
+		trainer.test(test_dataset, device)
 
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 
-	parser.add_argument("-encoder", default='transformer', type=str,
+	parser.add_argument("--encoder", default='transformer', type=str,
 						choices=['classifier', 'transformer', 'rnn', 'baseline'])
-	parser.add_argument("-mode", default='train', type=str, choices=['train', 'validate', 'test'])
-	parser.add_argument("-do_eval", default='False', action='store_true')
-	parser.add_argument("-bert_data_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\data\\')
-	parser.add_argument("-model_path", default='../models/')
-	parser.add_argument("-result_path", default='../results/cnndm')
-	parser.add_argument("-temp_dir", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese', help='pre-trained bert model')
-	parser.add_argument("-bert_config_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese\\bert_config.json')
+	parser.add_argument("--mode", default='train', type=str, choices=['train', 'validate', 'test'])
+	parser.add_argument("--do_eval", default=False, action='store_true')
+	parser.add_argument("--do_test", default=False, action='store_true')
+	parser.add_argument("--bert_data_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\data\\')
+	parser.add_argument("--model_path", default='../models/')
+	parser.add_argument("--result_path", default='../results/cnndm')
+	parser.add_argument("--temp_dir", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese', help='pre-trained bert model')
+	parser.add_argument("--bert_config_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese\\bert_config.json')
 
-	parser.add_argument("-batch_size", default=16, type=int)
-	parser.add_argument("-train_steps", default=1000, type=int)
+	parser.add_argument("--batch_size", default=16, type=int)
+	parser.add_argument("--train_epochs", default=3, type=int)
 
-	parser.add_argument("-polarities_dim", default=3, type=int, help="The dimension of the output classes")
+	parser.add_argument("--max_seq_length", default=512, type=int)
+	parser.add_argument("--lr", default=1, type=float)
+	parser.add_argument("--dropout", default=0.1, type=float)
+	parser.add_argument("--optim", default='adam', type=str)
+	parser.add_argument("--polarities_dim", default=3, type=int, help="The dimension of the output classes")
+
+	parser.add_argument('--visible_gpus', default='-1', type=str)
+	parser.add_argument('--gpu_ranks', default='1', type=str)
+	parser.add_argument('--log_file', default='../logs/cnndm.log')
+	parser.add_argument('--dataset', default='')
+	parser.add_argument('--seed', default=666, type=int)
+
+	parser.add_argument("--save_checkpoint_epochs", default=1, type=int)
 
 	parser.add_argument("-use_interval", type=str2bool, nargs='?', const=True, default=True)
 	parser.add_argument("-hidden_size", default=128, type=int)
@@ -305,26 +318,17 @@ if __name__ == '__main__':
 
 	parser.add_argument("-param_init", default=0, type=float)
 	parser.add_argument("-param_init_glorot", type=str2bool, nargs='?', const=True, default=True)
-	parser.add_argument("-dropout", default=0.1, type=float)
-	parser.add_argument("-optim", default='adam', type=str)
-	parser.add_argument("-lr", default=1, type=float)
+
 	parser.add_argument("-beta1", default=0.9, type=float)
 	parser.add_argument("-beta2", default=0.999, type=float)
 	parser.add_argument("-decay_method", default='', type=str)
 	parser.add_argument("-warmup_steps", default=8000, type=int)
 	parser.add_argument("-max_grad_norm", default=0, type=float)
 
-	parser.add_argument("-save_checkpoint_steps", default=5, type=int)
 	parser.add_argument("-accum_count", default=1, type=int)
 	parser.add_argument("-world_size", default=1, type=int)
 	parser.add_argument("-report_every", default=1, type=int)
 	parser.add_argument("-recall_eval", type=str2bool, nargs='?', const=True, default=False)
-
-	parser.add_argument('-visible_gpus', default='-1', type=str)
-	parser.add_argument('-gpu_ranks', default='0', type=str)
-	parser.add_argument('-log_file', default='../logs/cnndm.log')
-	parser.add_argument('-dataset', default='')
-	parser.add_argument('-seed', default=666, type=int)
 
 	parser.add_argument("-test_all", type=str2bool, nargs='?', const=True, default=False)
 	parser.add_argument("-test_from", default='')
@@ -344,16 +348,16 @@ if __name__ == '__main__':
 		multi_main(args)
 	elif args.mode == 'train':
 		train(args, device_id)
-	elif args.mode == 'validate':
-		wait_and_validate(args, device_id)
-	elif (args.mode == 'lead'):
-		baseline(args, cal_lead=True)
-	elif (args.mode == 'oracle'):
-		baseline(args, cal_oracle=True)
-	elif (args.mode == 'test'):
-		cp = args.test_from
-		try:
-			step = int(cp.split('.')[-2].split('_')[-1])
-		except:
-			step = 0
-		test(args, device_id, cp, step)
+	# elif args.mode == 'validate':
+	# 	wait_and_validate(args, device_id)
+	# elif (args.mode == 'lead'):
+	# 	baseline(args, cal_lead=True)
+	# elif (args.mode == 'oracle'):
+	# 	baseline(args, cal_oracle=True)
+	# elif (args.mode == 'test'):
+	# 	cp = args.test_from
+	# 	try:
+	# 		step = int(cp.split('.')[-2].split('_')[-1])
+	# 	except:
+	# 		step = 0
+	# 	test(args, device_id, cp, step)

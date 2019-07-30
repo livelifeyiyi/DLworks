@@ -3,6 +3,7 @@ import glob
 import random
 
 import numpy as np
+import pandas as pd
 import torch
 
 from bertTransformer.others.logging import logger
@@ -279,26 +280,38 @@ from bertTransformer.others.logging import logger
 # 			yield batch
 
 
-def preprocess(ex, device):
+def _pad(data, pad_id, width=-1):
+	if (width == -1):
+		width = max(len(d) for d in data)
+	# rtn_data = [d + [pad_id] * (width - len(d)) for d in data]
+	rtn_data = data + [pad_id] * (width-len(data))
+	return np.array(rtn_data)
+
+
+def preprocess(ex, device, max_seq_length, max_cls):
 	src = ex['src']
 	if ('labels' in ex):
 		labels = ex['labels']
 	else:
 		labels = ex['src_sent_labels']
-
 	segs = ex['segs']
 	# if (not self.args.use_interval):
 	# 	segs = [0] * len(segs)
 	clss = ex['clss']
 	src_txt = ex['src_txt']
 	# tgt_txt = ex['tgt_txt']
+
+	src = _pad(src, 0, max_seq_length)  # torch.tensor().to(device)
+	# labels = torch.tensor(labels).to(device)
+	segs = _pad(segs, 0, max_seq_length)  # torch.tensor().to(device)
+	clss = _pad(clss, -1, max_cls)  # torch.tensor().to(device)
 	mask = 1 - (src == 0)
 	mask_cls = 1 - (clss == -1)
 	# clss[clss == -1] = 0
-	return src.to(device), labels.to(device), segs.to(device), clss.to(device), mask.to(device), mask_cls.to(device)
+	return [src, labels, segs, clss, mask, mask_cls]
 
 
-def get_minibatches(data, minibatch_size, device, shuffle=True):
+def get_minibatches(data_dict, minibatch_size, device, max_seq_length, shuffle=True):
 	"""
 	Iterates through the provided data one minibatch at at time. You can use this function to
 	iterate through data in minibatches as follows:
@@ -320,24 +333,29 @@ def get_minibatches(data, minibatch_size, device, shuffle=True):
 			  list. This can be used to iterate through multiple data sources
 			  (e.g., features and labels) at the same time.
 	"""
-	data_list = []
-	for ex in data:
+	data = []
+	max_cls = 0
+	for ex in data_dict:
+		cls_lenth = len(ex['clss'])
+		if cls_lenth > max_cls:
+			max_cls = cls_lenth
+	for ex in data_dict:
 		if len(ex['src']) == 0:
 			continue
-		ex = preprocess(ex, device)
+		ex = preprocess(ex, device, max_seq_length, max_cls)
 		if ex is None:
 			continue
-		data_list.append(ex)
-	list_data = type(data) is list and (type(data[0]) is list or type(data[0]) is np.ndarray)
-	data_size = len(data[0]) if list_data else len(data)
+		data.append(ex)
+
+	# list_data = type(data) is list and (type(data[0]) is list or type(data[0]) is np.ndarray)
+	data_size = len(data)  # if list_data else len(data)
 	indices = np.arange(data_size)
 	if shuffle:
 		np.random.shuffle(indices)
 	for minibatch_start in np.arange(0, data_size, minibatch_size):
 		minibatch_indices = indices[minibatch_start:minibatch_start + minibatch_size]
-		yield [minibatch(d, minibatch_indices) for d in data] if list_data \
-			else minibatch(data, minibatch_indices)
+		yield minibatch(data, minibatch_indices) # [minibatch(d, minibatch_indices) for d in data] if list_data \
 
 
 def minibatch(data, minibatch_idx):
-	return data[minibatch_idx] if type(data) is np.ndarray else [data[i] for i in minibatch_idx]
+	return pd.DataFrame(data[minibatch_idx] if type(data) is np.ndarray else [data[i] for i in minibatch_idx])
