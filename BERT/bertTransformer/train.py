@@ -242,13 +242,13 @@ def train(args, device_id):
 	random.seed(args.seed)
 	torch.backends.cudnn.deterministic = True
 
-	def train_iter_fct():
-		return data_loader.Dataloader(args, load_dataset(args, 'train', shuffle=True), args.batch_size, device,
-									  shuffle=True, is_test=False)
+	# def train_iter_fct():
+	# 	return data_loader.Dataloader(args, load_dataset(args, 'train', shuffle=True), args.batch_size, device,
+	# 								  shuffle=True, is_test=False)
 
-	# dataset = torch.load(args.bert_data_path)
-	# logger.info('Loading dataset from %s, number of examples: %d' %
-	# 			(args.bert_data_path, len(dataset)))
+	train_dataset = torch.load(args.bert_data_path + 'train.data')
+	logger.info('Loading training dataset from %s, number of examples: %d' %
+				(args.bert_data_path, len(train_dataset)))
 
 	model = Summarizer(args, device, load_pretrained_bert=True)
 	if args.train_from != '':
@@ -266,17 +266,16 @@ def train(args, device_id):
 
 	logger.info(model)
 	trainer = build_trainer(args, device_id, model, optim)
-	trainer.train(train_iter_fct, args.train_steps)
+	trainer.train(train_dataset, args.train_steps, device)
 
 	if args.do_eval:
 		model = trainer.model
 		model.eval()
-
-		test_iter = data_loader.Dataloader(args, load_dataset(args, 'test', shuffle=False),
-										   args.batch_size, device,
-										   shuffle=False, is_test=True)
+		test_dataset = torch.load(args.bert_data_path + 'test.data')
+		logger.info('Loading test dataset from %s, number of examples: %d' %
+					(args.bert_data_path, len(test_dataset)))
 		trainer = build_trainer(args, device_id, model, None)
-		trainer.test(test_iter, args.train_steps)
+		trainer.test(test_dataset, args.train_steps, device)
 
 
 if __name__ == '__main__':
@@ -286,13 +285,13 @@ if __name__ == '__main__':
 						choices=['classifier', 'transformer', 'rnn', 'baseline'])
 	parser.add_argument("-mode", default='train', type=str, choices=['train', 'validate', 'test'])
 	parser.add_argument("-do_eval", default='False', action='store_true')
-	parser.add_argument("-bert_data_path", default='../../data/BertSumvalid.data')
+	parser.add_argument("-bert_data_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\data\\')
 	parser.add_argument("-model_path", default='../models/')
 	parser.add_argument("-result_path", default='../results/cnndm')
 	parser.add_argument("-temp_dir", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese', help='pre-trained bert model')
 	parser.add_argument("-bert_config_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese\\bert_config.json')
 
-	parser.add_argument("-batch_size", default=1000, type=int)
+	parser.add_argument("-batch_size", default=16, type=int)
 	parser.add_argument("-train_steps", default=1000, type=int)
 
 	parser.add_argument("-polarities_dim", default=3, type=int, help="The dimension of the output classes")

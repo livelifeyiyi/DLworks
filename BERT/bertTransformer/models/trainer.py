@@ -6,7 +6,7 @@ from sklearn import metrics
 from tensorboardX import SummaryWriter
 
 import bertTransformer.distributed as distributed
-from bertTransformer.models import data_loader
+from bertTransformer.models.data_loader import get_minibatches
 # import onmt
 from bertTransformer.models.reporter import ReportMgr
 from bertTransformer.models.stats import Statistics
@@ -65,7 +65,6 @@ def build_trainer(args, device_id, model,
 class Trainer(object):
 	"""
     Class that controls the training process.
-
     Args:
             model(:py:class:`onmt.models.model.NMTModel`): translation model
                 to train
@@ -106,12 +105,11 @@ class Trainer(object):
 		if (model):
 			self.model.train()
 
-	def train(self, train_iter_fct, train_steps, valid_iter_fct=None, valid_steps=-1):
+	def train(self, train_dataset, train_steps, device):  # , valid_iter_fct=None, valid_steps=-1)
 		"""
         The main training loops.
         by iterating over training data (i.e. `train_iter_fct`)
         and running validation (i.e. iterating over `valid_iter_fct`
-
         Args:
             train_iter_fct(function): a function that returns the train
                 iterator. e.g. something like
@@ -120,7 +118,6 @@ class Trainer(object):
             train_steps(int):
             valid_steps(int):
             save_checkpoint_steps(int):
-
         Return:
             None
         """
@@ -131,7 +128,7 @@ class Trainer(object):
 		true_batchs = []
 		accum = 0
 		normalization = 0
-		train_iter = train_iter_fct()
+		# train_iter = train_iter_fct()
 
 		total_stats = Statistics()
 		report_stats = Statistics()
@@ -140,35 +137,81 @@ class Trainer(object):
 		while step <= train_steps:
 			n_correct, n_total = 0., 0.
 			reduce_counter = 0
-			for i, batch in enumerate(train_iter):
+			loss_total = 0
+			mini_batches = get_minibatches(train_dataset, self.args.batch_size, device)
+			for i, batch in enumerate(mini_batches):
 				if self.n_gpu == 0 or (i % self.n_gpu == self.gpu_rank):
 
-					true_batchs.append(batch)
-					normalization += batch.batch_size
-					accum += 1
-					if accum == self.grad_accum_count:
-						reduce_counter += 1
+					# true_batchs.append(batch)
+					# normalization += batch.batch_size
+					# accum += 1
+					# if accum == self.grad_accum_count:
+					# 	reduce_counter += 1
+					# 	if self.n_gpu > 1:
+					# 		normalization = sum(distributed.all_gather_list(normalization))
+					src, labels, segs, clss, mask, mask_cls = batch
+					# src = batch.src
+					# labels = batch.labels
+					# segs = batch.segs
+					# clss = batch.clss
+					# mask = batch.mask
+					# mask_cls = batch.mask_cls
+
+					logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
+
+					loss = self.loss(logits, labels)
+					n_correct += (torch.argmax(logits, -1) == labels).sum().item()
+					n_total += len(logits)
+					loss_total += loss.item() * len(logits)
+					# loss = (loss * mask.float()).sum()
+					# (loss / loss.numel()).backward()
+					loss.backward()
+					# loss.div(float(normalization)).backward()
+
+					batch_stats = Statistics(float(loss.cpu().item()), normalization)
+
+					total_stats.update(batch_stats)
+					report_stats.update(batch_stats)
+
+					# 4. Update the parameters and statistics.
+					if self.grad_accum_count == 1:
+						# Multi GPU gradient gather
 						if self.n_gpu > 1:
-							normalization = sum(distributed.all_gather_list(normalization))
+							grads = [p.grad.data for p in self.model.parameters()
+									 if p.requires_grad
+									 and p.grad is not None]
+							distributed.all_reduce_and_rescale_tensors(
+								grads, float(1))
+						self.optim.step()
 
-						n_correct, n_total, loss_total = self._gradient_accumulation(true_batchs, normalization, total_stats,
-																		 report_stats, n_correct, n_total)
+					# in case of multi step gradient accumulation,
+					# update only after accum batches
+				if self.grad_accum_count > 1:
+					if self.n_gpu > 1:
+						grads = [p.grad.data for p in self.model.parameters()
+								 if p.requires_grad
+								 and p.grad is not None]
+						distributed.all_reduce_and_rescale_tensors(
+							grads, float(1))
+					self.optim.step()
 
-						logger.info('loss:{.4f}, acc:{.4f}'.format(loss_total/n_total, n_correct/n_total))
-						report_stats = self._maybe_report_training(step, train_steps, self.optim.learning_rate, report_stats)
+				# return n_correct, n_total, loss_total
 
-						true_batchs = []
-						accum = 0
-						normalization = 0
-						if step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
-							self._save(step)
+				logger.info('loss:{:.4f}, acc:{:.4f}'.format(loss_total/n_total, n_correct/n_total))
+				report_stats = self._maybe_report_training(step, train_steps, self.optim.learning_rate, report_stats)
 
-						step += 1
-						if step > train_steps:
-							break
-			train_iter = train_iter_fct()
+				# true_batchs = []
+				# accum = 0
+				# normalization = 0
+				# if step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
+				# 	self._save(step)
+				#
+				# step += 1
+				# if step > train_steps:
+				# 	break
 
-		return total_stats
+
+		# return total_stats
 
 	def validate(self, valid_iter, step=0):
 		""" Validate model.
@@ -198,7 +241,7 @@ class Trainer(object):
 			self._report_step(0, step, valid_stats=stats)
 			return stats
 
-	def test(self, test_iter, step, cal_lead=False, cal_oracle=False):
+	def test(self, test_dataset, step, device, cal_lead=False, cal_oracle=False):
 		""" Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -234,7 +277,8 @@ class Trainer(object):
 					target_all = []
 					output_all = []
 					# n_correct, n_total = 0., 0.
-					for batch in test_iter:
+					mini_batches = get_minibatches(test_dataset, self.args.batch_size, device)
+					for i, batch in enumerate(mini_batches):
 						src = batch.src
 						labels = batch.labels
 						segs = batch.segs
@@ -399,11 +443,9 @@ class Trainer(object):
 	def _maybe_gather_stats(self, stat):
 		"""
         Gather statistics in multi-processes cases
-
         Args:
             stat(:obj:onmt.utils.Statistics): a Statistics object to gather
                 or None (it returns None in this case)
-
         Returns:
             stat: the updated (or unchanged) stat object
         """
