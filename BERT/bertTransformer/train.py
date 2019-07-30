@@ -235,7 +235,7 @@ def train(args, device_id):
 	torch.backends.cudnn.deterministic = True
 
 	if device_id >= 0:
-		torch.cuda.set_device(device_id)
+		# torch.cuda.set_device(device_id)
 		torch.cuda.manual_seed(args.seed)
 
 	torch.manual_seed(args.seed)
@@ -286,11 +286,11 @@ if __name__ == '__main__':
 	parser.add_argument("--mode", default='train', type=str, choices=['train', 'validate', 'test'])
 	parser.add_argument("--do_eval", default=False, action='store_true')
 	parser.add_argument("--do_test", default=False, action='store_true')
-	parser.add_argument("--bert_data_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\data\\')
+	parser.add_argument("--bert_data_path", default='../data/')
 	parser.add_argument("--model_path", default='../models/')
 	parser.add_argument("--result_path", default='../results/cnndm')
-	parser.add_argument("--temp_dir", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese', help='pre-trained bert model')
-	parser.add_argument("--bert_config_path", default='C:\\(O_O)!\\learnSth\\PycharmProjects\\python3\\TFgirl\\BERT\\bert-base-chinese\\bert_config.json')
+	parser.add_argument("--temp_dir", default='../bert-base-chinese', help='pre-trained bert model')
+	parser.add_argument("--bert_config_path", default='../bert-base-chinese/bert_config.json')
 
 	parser.add_argument("--batch_size", default=3, type=int)
 	parser.add_argument("--train_epochs", default=3, type=int)
@@ -307,7 +307,7 @@ if __name__ == '__main__':
 	parser.add_argument('--dataset', default='')
 	parser.add_argument('--seed', default=666, type=int)
 
-	parser.add_argument("--save_checkpoint_epochs", default=1, type=int)
+	parser.add_argument("--save_checkpoint_steps", default=1000, type=int)
 
 	parser.add_argument("-use_interval", type=str2bool, nargs='?', const=True, default=True)
 	parser.add_argument("-hidden_size", default=128, type=int)
@@ -337,17 +337,16 @@ if __name__ == '__main__':
 	parser.add_argument("-block_trigram", type=str2bool, nargs='?', const=True, default=True)
 
 	args = parser.parse_args()
-	args.gpu_ranks = [int(i) for i in args.gpu_ranks.split(',')]
-	os.environ["CUDA_VISIBLE_DEVICES"] = args.visible_gpus
+	args.gpu_ranks = [int(i) for i in args.gpu_ranks.split(',')]\
 
 	init_logger(args.log_file)
 	device = "cpu" if args.visible_gpus == '-1' else "cuda"
-	device_id = args.visible_gpus if device == "cuda" else -1
-
+	device_id = int(args.visible_gpus) if device == "cuda" else -1
+	os.environ['CUDA_VISIBLE_DEVICES'] = args.visible_gpus
 	if args.world_size > 1:
 		multi_main(args)
 	elif args.mode == 'train':
-		train(args, devic_id)
+		train(args, device_id)
 	# elif args.mode == 'validate':
 	# 	wait_and_validate(args, device_id)
 	# elif (args.mode == 'lead'):
