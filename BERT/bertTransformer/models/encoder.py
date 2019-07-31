@@ -88,7 +88,7 @@ class TransformerInterEncoder(nn.Module):
 		self.pooler = BertPooler(d_model)
 		self.dense = nn.Linear(d_model, polarities_dim)
 
-	def forward(self, top_vecs, mask):
+	def forward(self, out_name, top_vecs, mask):
 		""" See :obj:`EncoderBase.forward()`"""
 
 		batch_size, n_sents = top_vecs.size(0), top_vecs.size(1)
@@ -103,9 +103,10 @@ class TransformerInterEncoder(nn.Module):
 
 		# sent_scores = self.sigmoid(self.wo(x))
 		# sent_scores = sent_scores.squeeze(-1) * mask.float()
-
-		# x = self.pooler(x)
-		x = torch.mean(x, dim=1)
+		if out_name == 'pool':
+			x = self.pooler(x)
+		if out_name == 'avg':
+			x = torch.mean(x, dim=1)
 		logits = self.dense(x)
 
 		return logits  # sent_scores

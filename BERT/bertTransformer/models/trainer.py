@@ -242,7 +242,7 @@ class Trainer(object):
 
 		# return total_stats
 
-	def validate(self, valid_dataset, device, step=0):
+	def validate(self, valid_dataset, device, epoch=0):
 		""" Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -282,7 +282,7 @@ class Trainer(object):
 				# loss = (loss * mask.float()).sum()
 				batch_stats = Statistics(float(loss.cpu().item()), len(labels))
 				stats.update(batch_stats)
-			self._report_step(0, step, valid_stats=stats)
+			self._report_step(0, epoch, valid_stats=stats)
 			return stats
 
 	def test(self, model, test_dataset, device, cal_lead=False, cal_oracle=False):
@@ -296,8 +296,8 @@ class Trainer(object):
 		mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length)
 		logger.info('Number of minibatches: %s' % (len(test_dataset) // self.args.batch_size))
 		with torch.no_grad():
-			target_all = []
-			output_all = []
+			target_all = None
+			output_all = None
 			for step, batch in enumerate(mini_batches):
 				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
 				if torch.cuda.is_available():
@@ -516,7 +516,7 @@ class Trainer(object):
 			'opt': self.args,
 			'optim': self.optim,
 		}
-		checkpoint_path = os.path.join(self.args.model_path, 'model_{}_epoch_{}_acc_{:.4d}.pt'.format(model_name, epoch, acc))
+		checkpoint_path = os.path.join(self.args.model_path, 'model_{}_epoch_{}_acc_{:.4f}.pt'.format(model_name, epoch, acc))
 		logger.info("Saving checkpoint %s" % checkpoint_path)
 		# checkpoint_path = '%s_step_%d.pt' % (FLAGS.model_path, step)
 		if not os.path.exists(checkpoint_path):

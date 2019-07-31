@@ -93,5 +93,5 @@ class Summarizer(nn.Module):
 		sents_vec = top_vec[torch.arange(top_vec.size(0)).unsqueeze(1), clss]  # get vectors of [cls] tags
 		sents_vec = sents_vec * mask_cls[:, :, None].float()  # (batch_size, sentences_num, 768)
 		# sent_scores = self.encoder(sents_vec, mask_cls).squeeze(-1)  # (batch_size, sentences_num)
-		logits = self.encoder(sents_vec, mask_cls)  # (batch_size, class_num)
+		logits = self.encoder(self.args.model_name, sents_vec, mask_cls)  # (batch_size, class_num)
 		return logits  # , mask_cls

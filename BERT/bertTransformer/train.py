@@ -15,7 +15,7 @@ import torch
 from pytorch_pretrained_bert import BertConfig, optimization
 
 import bertTransformer.distributed as distributed
-from bertTransformer.models import data_loader, model_builder
+# from bertTransformer.models import data_loader, model_builder
 # from bertTransformer.models.data_loader import load_dataset
 from bertTransformer.models.model_builder import Summarizer
 from bertTransformer.models.trainer import build_trainer
@@ -158,7 +158,7 @@ def wait_and_validate(args, device_id):
 				time.sleep(300)
 
 
-def validate(args, device_id, pt, step):
+def validate(args, device_id, pt, epoch):
 	device = "cpu" if args.visible_gpus == '-1' else "cuda"
 	if (pt != ''):
 		test_from = pt
@@ -176,24 +176,24 @@ def validate(args, device_id, pt, step):
 	model = Summarizer(args, device, load_pretrained_bert=False, bert_config=config)
 	model.load_cp(checkpoint)
 	model.eval()
-	valid_dataset = torch.load(args.bert_data_path + 'train.data')
+	valid_dataset = torch.load(args.bert_data_path + 'valid.data')
 
 	trainer = build_trainer(args, device_id, model, None)
-	stats = trainer.validate(valid_dataset, step)
+	stats = trainer.validate(valid_dataset, epoch)
 	return stats.xent()
 
 
-def test(args, device_id, pt, step):
+def test(args, device_id, pt):
 	device = "cpu" if args.visible_gpus == '-1' else "cuda"
-	if (pt != ''):
+	if pt != '':
 		test_from = pt
 	else:
-		test_from = args.test_from
+		test_from = args.best_model
 	logger.info('Loading checkpoint from %s' % test_from)
 	checkpoint = torch.load(test_from, map_location=lambda storage, loc: storage)
 	opt = vars(checkpoint['opt'])
 	for k in opt.keys():
-		if (k in model_flags):
+		if k in model_flags:
 			setattr(args, k, opt[k])
 	print(args)
 
@@ -202,24 +202,20 @@ def test(args, device_id, pt, step):
 	model.load_cp(checkpoint)
 	model.eval()
 
-	test_iter = data_loader.Dataloader(args, load_dataset(args, 'test', shuffle=False),
-									   args.batch_size, device,
-									   shuffle=False, is_test=True)
+	test_dataset = torch.load(args.bert_data_path + 'test.data')
 	trainer = build_trainer(args, device_id, model, None)
-	trainer.test(test_iter, step)
+	trainer.test(model, test_dataset, device)
 
 
-def baseline(args, cal_lead=False, cal_oracle=False):
-	test_iter = data_loader.Dataloader(args, load_dataset(args, 'test', shuffle=False),
-									   args.batch_size, device,
-									   shuffle=False, is_test=True)
-
-	trainer = build_trainer(args, device_id, None, None)
-	#
-	if (cal_lead):
-		trainer.test(test_iter, 0, cal_lead=True)
-	elif (cal_oracle):
-		trainer.test(test_iter, 0, cal_oracle=True)
+# def baseline(args, cal_lead=False, cal_oracle=False):
+# 	test_dataset = torch.load(args.bert_data_path + 'test.data')
+#
+# 	trainer = build_trainer(args, device_id, None, None)
+# 	#
+# 	if (cal_lead):
+# 		trainer.test(model, test_dataset, device)
+# 	elif (cal_oracle):
+# 		trainer.test(model, test_dataset, device)
 
 
 def train(args, device_id):
@@ -275,7 +271,7 @@ def train(args, device_id):
 		logger.info('Loading test dataset from %s, number of examples: %d' %
 					(args.bert_data_path, len(test_dataset)))
 		trainer = build_trainer(args, device_id, model, None)
-		trainer.test(test_dataset, device)
+		trainer.test(model, test_dataset, device)
 
 
 if __name__ == '__main__':
@@ -301,7 +297,6 @@ if __name__ == '__main__':
 	parser.add_argument('--l2reg', default=0.01, type=float)
 	parser.add_argument("--dropout", default=0.1, type=float)
 
-	parser.add_argument("--optim", default='adam', type=str)
 	parser.add_argument("--polarities_dim", default=3, type=int, help="The dimension of the output classes")
 
 	parser.add_argument('--visible_gpus', default='-1', type=str)
@@ -311,7 +306,9 @@ if __name__ == '__main__':
 	parser.add_argument('--seed', default=666, type=int)
 
 	parser.add_argument("--save_checkpoint_steps", default=1000, type=int)
+	parser.add_argument("-best_model", default='')
 
+	parser.add_argument("--optim", default='adam', type=str)
 	parser.add_argument("-use_interval", type=str2bool, nargs='?', const=True, default=True)
 	parser.add_argument("-hidden_size", default=128, type=int)
 	parser.add_argument("-ff_size", default=512, type=int)
@@ -334,13 +331,12 @@ if __name__ == '__main__':
 	parser.add_argument("-recall_eval", type=str2bool, nargs='?', const=True, default=False)
 
 	parser.add_argument("-test_all", type=str2bool, nargs='?', const=True, default=False)
-	parser.add_argument("-test_from", default='')
 	parser.add_argument("-train_from", default='')
 	parser.add_argument("-report_rouge", type=str2bool, nargs='?', const=True, default=True)
 	parser.add_argument("-block_trigram", type=str2bool, nargs='?', const=True, default=True)
 
 	args = parser.parse_args()
-	args.gpu_ranks = [int(i) for i in args.gpu_ranks.split(',')]\
+	args.gpu_ranks = [int(i) for i in args.gpu_ranks.split(',')]
 
 	init_logger(args.log_file)
 	device = "cpu" if args.visible_gpus == '-1' else "cuda"
@@ -356,10 +352,10 @@ if __name__ == '__main__':
 	# 	baseline(args, cal_lead=True)
 	# elif (args.mode == 'oracle'):
 	# 	baseline(args, cal_oracle=True)
-	# elif (args.mode == 'test'):
-	# 	cp = args.test_from
-	# 	try:
-	# 		step = int(cp.split('.')[-2].split('_')[-1])
-	# 	except:
-	# 		step = 0
-	# 	test(args, device_id, cp, step)
+	elif args.mode == 'test':
+		cp = args.best_model
+		# 	try:
+		# 		step = int(cp.split('.')[-2].split('_')[-1])
+		# 	except:
+		# 		step = 0
+		test(args, device_id, cp)
