@@ -212,16 +212,16 @@ class Trainer(object):
 					valid_acc = self.test(self.model, test_dataset, device)
 					if valid_acc > self.best_acc:
 						self.best_acc = valid_acc
-						self._save(self.model, epoch, self.best_acc)
+						self._save(self.args.model_name+self.args.lr+'valid', epoch, self.best_acc)
 				# 	self._save(epoch, step)
 				# report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
 
 				# in case of multi step gradient accumulation,
 				# update only after accum batches
 			valid_acc = self.test(self.model, test_dataset, device)
-			if valid_acc > self.best_acc:
-				self.best_acc = valid_acc
-				self._save(self.model, epoch, self.best_acc)
+			# if valid_acc > self.best_acc:
+			# 	self.best_acc = valid_acc
+			self._save(self.args.model_name+self.args.lr, epoch, valid_acc)
 			if self.grad_accum_count > 1:
 				if self.n_gpu > 1:
 					grads = [p.grad.data for p in self.model.parameters()
