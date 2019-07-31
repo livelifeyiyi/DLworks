@@ -267,8 +267,8 @@ def train(args, device_id):
 	if args.do_test:
 		model = trainer.model
 		model.eval()
-		test_dataset = torch.load(args.bert_data_path + 'test.data')
-		logger.info('Loading test dataset from %s, number of examples: %d' %
+		test_dataset = torch.load(args.bert_data_path + 'valid.data')
+		logger.info('Loading valid dataset from %s, number of examples: %d' %
 					(args.bert_data_path, len(test_dataset)))
 		trainer = build_trainer(args, device_id, model, None)
 		trainer.test(model, test_dataset, device)
@@ -287,7 +287,7 @@ if __name__ == '__main__':
 	parser.add_argument("--model_path", default='../models/')
 	parser.add_argument("--result_path", default='../results/cnndm')
 	parser.add_argument("--pretrained_dir", default='../bert-base-chinese', help='pre-trained bert model')
-	parser.add_argument("--bert_config", default='bert_config.json')
+	parser.add_argument("--bert_config_path", default='bert_config.json')
 
 	parser.add_argument("--batch_size", default=3, type=int)
 	parser.add_argument("--train_epochs", default=3, type=int)
@@ -305,7 +305,7 @@ if __name__ == '__main__':
 	parser.add_argument('--dataset', default='')
 	parser.add_argument('--seed', default=666, type=int)
 
-	parser.add_argument("--save_checkpoint_steps", default=1000, type=int)
+	parser.add_argument("--check_steps", default=500, type=int)
 	parser.add_argument("-best_model", default='')
 
 	parser.add_argument("--optim", default='adam', type=str)

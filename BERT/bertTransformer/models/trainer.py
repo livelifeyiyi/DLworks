@@ -91,14 +91,14 @@ class Trainer(object):
 				 report_manager=None):
 		# Basic attributes.
 		self.args = args
-		self.save_checkpoint_steps = args.save_checkpoint_steps
+		self.check_steps = args.check_steps
 		self.model = model
 		self.optim = optim
 		self.grad_accum_count = grad_accum_count
 		self.n_gpu = n_gpu
 		self.gpu_rank = gpu_rank
 		self.report_manager = report_manager
-
+		self.best_acc = 0.
 		self.loss = torch.nn.CrossEntropyLoss()  # torch.nn.BCELoss(reduction='none')
 		assert grad_accum_count > 0
 		# Set model in training mode.
@@ -133,14 +133,15 @@ class Trainer(object):
 		report_stats = Statistics()
 		self._start_report_manager(start_time=total_stats.start_time)
 		if self.args.do_eval:
-			test_dataset = torch.load(self.args.bert_data_path + 'valid.data')
-			logger.info('Loading valid dataset from %s, number of examples: %d' %
+			test_dataset = torch.load(self.args.bert_data_path + 'test.data')
+			logger.info('Loading test dataset from %s, number of examples: %d' %
 			            (self.args.bert_data_path, len(test_dataset)))
 
 		for epoch in range(self.args.train_epochs):
 			n_correct, n_total = 0., 0.
 			reduce_counter = 0
 			loss_total = 0
+
 			logger.info('Getting minibatches')
 			mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
 			logger.info('Number of minibatches: %s' % (len(train_dataset) // self.args.batch_size))
@@ -207,13 +208,20 @@ class Trainer(object):
 				report_stats.update(batch_stats)
 
 				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total / n_total, n_correct / n_total))
-				# if step != 0 and step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
+				if step != 0 and step % self.check_steps == 0:
+					valid_acc = self.test(self.model, test_dataset, device)
+					if valid_acc > self.best_acc:
+						self.best_acc = valid_acc
+						self._save(self.model, epoch, self.best_acc)
 				# 	self._save(epoch, step)
 				# report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
 
 				# in case of multi step gradient accumulation,
 				# update only after accum batches
-			self._save(self.args.model_name, epoch, n_correct / n_total)
+			valid_acc = self.test(self.model, test_dataset, device)
+			if valid_acc > self.best_acc:
+				self.best_acc = valid_acc
+				self._save(self.model, epoch, self.best_acc)
 			if self.grad_accum_count > 1:
 				if self.n_gpu > 1:
 					grads = [p.grad.data for p in self.model.parameters()
@@ -296,6 +304,8 @@ class Trainer(object):
 		mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length)
 		logger.info('Number of minibatches: %s' % (len(test_dataset) // self.args.batch_size))
 		with torch.no_grad():
+			n_correct = 0.
+			n_total = 0.
 			target_all = None
 			output_all = None
 			for step, batch in enumerate(mini_batches):
@@ -321,6 +331,8 @@ class Trainer(object):
 
 				logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
 				# loss = self.loss(logits, labels)
+				n_correct += (torch.argmax(logits, -1) == labels).sum().item()
+				n_total += len(logits)
 				if target_all is None:
 					target_all = labels
 					output_all = logits
@@ -334,11 +346,12 @@ class Trainer(object):
 				# sent_scores = sent_scores + mask.float()
 				# sent_scores = sent_scores.cpu().data.numpy()
 				# selected_ids = np.argsort(-sent_scores, 1)
-
+			acc = n_correct / n_total
 			pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
 												 target_names=['NEG', 'NEU', 'POS'])
 			logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
 			# self._report_step(0, step, valid_stats=stats)
+		return acc
 
 		def orig():
 			# Set model in validating mode.
