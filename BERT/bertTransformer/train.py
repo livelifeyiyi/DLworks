@@ -283,6 +283,7 @@ if __name__ == '__main__':
 
 	parser.add_argument("--encoder", default='transformer', type=str,
 						choices=['classifier', 'transformer', 'rnn', 'baseline'])
+	parser.add_argument("--model_name", default="avg", choices=['avg', 'pool'])
 	parser.add_argument("--mode", default='train', type=str, choices=['train', 'validate', 'test'])
 	parser.add_argument("--do_eval", default=False, action='store_true')
 	parser.add_argument("--do_test", default=False, action='store_true')

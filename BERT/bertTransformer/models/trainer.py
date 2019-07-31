@@ -213,7 +213,7 @@ class Trainer(object):
 
 				# in case of multi step gradient accumulation,
 				# update only after accum batches
-			self._save(epoch, n_correct / n_total)
+			self._save(self.args.model_name, epoch, n_correct / n_total)
 			if self.grad_accum_count > 1:
 				if self.n_gpu > 1:
 					grads = [p.grad.data for p in self.model.parameters()
@@ -502,7 +502,7 @@ class Trainer(object):
 
 		return n_correct, n_total, loss_total
 
-	def _save(self, epoch, acc):
+	def _save(self, model_name, epoch, acc):
 		real_model = self.model
 		# real_generator = (self.generator.module
 		#                   if isinstance(self.generator, torch.nn.DataParallel)
@@ -516,7 +516,7 @@ class Trainer(object):
 			'opt': self.args,
 			'optim': self.optim,
 		}
-		checkpoint_path = os.path.join(self.args.model_path, 'model_epoch_{}_acc_{:.4d}.pt'.format(epoch, acc))
+		checkpoint_path = os.path.join(self.args.model_path, 'model_{}_epoch_{}_acc_{:.4d}.pt'.format(model_name, epoch, acc))
 		logger.info("Saving checkpoint %s" % checkpoint_path)
 		# checkpoint_path = '%s_step_%d.pt' % (FLAGS.model_path, step)
 		if not os.path.exists(checkpoint_path):
