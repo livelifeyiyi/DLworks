@@ -67,8 +67,7 @@ class TransformerEncoderLayer(nn.Module):
 			input_norm = inputs
 
 		mask = mask.unsqueeze(1)
-		context = self.self_attn(input_norm, input_norm, input_norm,
-								 mask=mask)
+		context = self.self_attn(input_norm, input_norm, input_norm, mask=mask)
 		out = self.dropout(context) + inputs
 		return self.feed_forward(out)
 
@@ -96,7 +95,7 @@ class TransformerInterEncoder(nn.Module):
 		pos_emb = self.pos_emb.pe[:, :n_sents]
 		x = top_vecs * mask[:, :, None].float()
 		x = x + pos_emb
-
+		# x_ = x
 		for i in range(self.num_inter_layers):
 			x = self.transformer_inter[i](i, x, x, 1 - mask)  # all_sents * max_tokens * dim
 
@@ -105,7 +104,8 @@ class TransformerInterEncoder(nn.Module):
 		# sent_scores = self.sigmoid(self.wo(x))
 		# sent_scores = sent_scores.squeeze(-1) * mask.float()
 
-		x = self.pooler(x)
+		# x = self.pooler(x)
+		x = torch.mean(x, dim=1)
 		logits = self.dense(x)
 
 		return logits  # sent_scores

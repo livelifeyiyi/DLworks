@@ -12,7 +12,7 @@ import signal
 import time
 
 import torch
-from pytorch_pretrained_bert import BertConfig
+from pytorch_pretrained_bert import BertConfig, optimization
 
 import bertTransformer.distributed as distributed
 from bertTransformer.models import data_loader, model_builder
@@ -249,18 +249,20 @@ def train(args, device_id):
 				(args.bert_data_path, len(train_dataset)))
 
 	model = Summarizer(args, device, load_pretrained_bert=True)
-	if args.train_from != '':
-		logger.info('Loading checkpoint from %s' % args.train_from)
-		checkpoint = torch.load(args.train_from,
-								map_location=lambda storage, loc: storage)
-		opt = vars(checkpoint['opt'])
-		for k in opt.keys():
-			if (k in model_flags):
-				setattr(args, k, opt[k])
-		model.load_cp(checkpoint)
-		optim = model_builder.build_optim(args, model, checkpoint)
-	else:
-		optim = model_builder.build_optim(args, model, None)
+	# if args.train_from != '':
+	# 	logger.info('Loading checkpoint from %s' % args.train_from)
+	# 	checkpoint = torch.load(args.train_from,
+	# 							map_location=lambda storage, loc: storage)
+	# 	opt = vars(checkpoint['opt'])
+	# 	for k in opt.keys():
+	# 		if (k in model_flags):
+	# 			setattr(args, k, opt[k])
+	# 	model.load_cp(checkpoint)
+	# 	optim = model_builder.build_optim(args, model, checkpoint)
+	# else:
+	# 	optim = model_builder.build_optim(args, model, None)
+	_params = filter(lambda p: p.requires_grad, model.parameters())
+	optim = optimization.BertAdam(_params, lr=args.lr, weight_decay=args.l2reg)
 
 	logger.info(model)
 	trainer = build_trainer(args, device_id, model, optim)
@@ -295,7 +297,9 @@ if __name__ == '__main__':
 
 	parser.add_argument("--max_seq_length", default=512, type=int)
 	parser.add_argument("--lr", default=1, type=float)
+	parser.add_argument('--l2reg', default=0.01, type=float)
 	parser.add_argument("--dropout", default=0.1, type=float)
+
 	parser.add_argument("--optim", default='adam', type=str)
 	parser.add_argument("--polarities_dim", default=3, type=int, help="The dimension of the output classes")
 
@@ -320,7 +324,7 @@ if __name__ == '__main__':
 	parser.add_argument("-beta1", default=0.9, type=float)
 	parser.add_argument("-beta2", default=0.999, type=float)
 	parser.add_argument("-decay_method", default='', type=str)
-	parser.add_argument("-warmup_steps", default=8000, type=int)
+	parser.add_argument("-warmup_steps", default=50, type=int)
 	parser.add_argument("-max_grad_norm", default=0, type=float)
 
 	parser.add_argument("-accum_count", default=1, type=int)

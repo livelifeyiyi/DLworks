@@ -40,10 +40,10 @@ def build_optim(args, model, checkpoint):
 
 
 class Bert(nn.Module):
-	def __init__(self, temp_dir, load_pretrained_bert, bert_config):
+	def __init__(self, pretrained_dir, load_pretrained_bert, bert_config):
 		super(Bert, self).__init__()
 		if load_pretrained_bert:
-			self.model = BertModel.from_pretrained(temp_dir)
+			self.model = BertModel.from_pretrained(pretrained_dir)
 		else:
 			self.model = BertModel(bert_config)
 
@@ -58,7 +58,7 @@ class Summarizer(nn.Module):
 		super(Summarizer, self).__init__()
 		self.args = args
 		self.device = device
-		self.bert = Bert(args.temp_dir, load_pretrained_bert, bert_config)
+		self.bert = Bert(args.pretrained_dir, load_pretrained_bert, bert_config)
 		if args.encoder == 'classifier':
 			self.encoder = Classifier(self.bert.model.config.hidden_size)
 		elif args.encoder == 'transformer':

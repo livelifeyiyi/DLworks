@@ -147,7 +147,7 @@ class Trainer(object):
 			logger.info('Start training...')
 			for step, batch in enumerate(mini_batches):
 				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
-
+				self.optim.zero_grad()
 					# true_batchs.append(batch)
 					# normalization += batch.batch_size
 					# accum += 1
@@ -191,31 +191,29 @@ class Trainer(object):
 				# (loss / loss.numel()).backward()
 				loss.backward()
 				# loss.div(float(normalization)).backward()
+				# 4. Update the parameters and statistics.
+				# if self.grad_accum_count == 1:
+				# Multi GPU gradient gather
+				if self.n_gpu > 1:
+					grads = [p.grad.data for p in self.model.parameters()
+							 if p.requires_grad
+							 and p.grad is not None]
+					distributed.all_reduce_and_rescale_tensors(
+						grads, float(1))
+				self.optim.step()
 
 				batch_stats = Statistics(float(loss.cpu().item()), normalization)
-
 				total_stats.update(batch_stats)
 				report_stats.update(batch_stats)
 
-				# 4. Update the parameters and statistics.
-				if self.grad_accum_count == 1:
-					# Multi GPU gradient gather
-					if self.n_gpu > 1:
-						grads = [p.grad.data for p in self.model.parameters()
-								 if p.requires_grad
-								 and p.grad is not None]
-						distributed.all_reduce_and_rescale_tensors(
-							grads, float(1))
-					self.optim.step()
-
 				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total / n_total, n_correct / n_total))
-				if step != 0 and step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
-					self._save(epoch, step)
+				# if step != 0 and step % self.save_checkpoint_steps == 0 and self.gpu_rank == 0:
+				# 	self._save(epoch, step)
 				# report_stats = self._maybe_report_training(step, epoch, self.optim.learning_rate, report_stats)
 
 				# in case of multi step gradient accumulation,
 				# update only after accum batches
-			self._save(epoch, step)
+			self._save(epoch, n_correct / n_total)
 			if self.grad_accum_count > 1:
 				if self.n_gpu > 1:
 					grads = [p.grad.data for p in self.model.parameters()
@@ -229,9 +227,12 @@ class Trainer(object):
 
 			if self.args.do_eval:
 				# model = trainer.model
-				self.model.eval()
+				# self.model.eval()
 				# trainer = build_trainer(args, device_id, model, None)
-				self.test(self.model, test_dataset, epoch, device)
+				try:
+					self.test(self.model, test_dataset, device)
+				except Exception as e:
+					logger.error(e)
 				# true_batchs = []
 				# accum = 0
 				# normalization = 0
@@ -284,7 +285,7 @@ class Trainer(object):
 			self._report_step(0, step, valid_stats=stats)
 			return stats
 
-	def test(self, model, test_dataset, step, device, cal_lead=False, cal_oracle=False):
+	def test(self, model, test_dataset, device, cal_lead=False, cal_oracle=False):
 		""" Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -319,7 +320,7 @@ class Trainer(object):
 					mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
 
 				logits = self.model(src, segs, clss, mask, mask_cls)  # , mask
-				loss = self.loss(logits, labels)
+				# loss = self.loss(logits, labels)
 				if target_all is None:
 					target_all = labels
 					output_all = logits
@@ -327,8 +328,8 @@ class Trainer(object):
 					target_all = torch.cat((target_all, labels), dim=0)
 					output_all = torch.cat((output_all, logits), dim=0)
 
-				batch_stats = Statistics(float(loss.cpu().item()), len(labels))
-				stats.update(batch_stats)
+				# batch_stats = Statistics(float(loss.cpu().item()), len(labels))
+				# stats.update(batch_stats)
 
 				# sent_scores = sent_scores + mask.float()
 				# sent_scores = sent_scores.cpu().data.numpy()
@@ -337,7 +338,7 @@ class Trainer(object):
 			pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
 												 target_names=['NEG', 'NEU', 'POS'])
 			logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
-			self._report_step(0, step, valid_stats=stats)
+			# self._report_step(0, step, valid_stats=stats)
 
 		def orig():
 			# Set model in validating mode.
@@ -501,7 +502,7 @@ class Trainer(object):
 
 		return n_correct, n_total, loss_total
 
-	def _save(self, epoch, step):
+	def _save(self, epoch, acc):
 		real_model = self.model
 		# real_generator = (self.generator.module
 		#                   if isinstance(self.generator, torch.nn.DataParallel)
@@ -515,7 +516,7 @@ class Trainer(object):
 			'opt': self.args,
 			'optim': self.optim,
 		}
-		checkpoint_path = os.path.join(self.args.model_path, 'model_epoch_%d_step_%d.pt' % (epoch, step))
+		checkpoint_path = os.path.join(self.args.model_path, 'model_epoch_{}_acc_{:.4d}.pt'.format(epoch, acc))
 		logger.info("Saving checkpoint %s" % checkpoint_path)
 		# checkpoint_path = '%s_step_%d.pt' % (FLAGS.model_path, step)
 		if not os.path.exists(checkpoint_path):
