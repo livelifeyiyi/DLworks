@@ -67,57 +67,100 @@ class BertData():
 		return src_subtoken_idxs, label, segments_ids, cls_ids, src
 
 
-def process_lie_segment(line_json, datasets, bert):
+class Segments:
+	def get_segments(self, sentences, args, entity_name, title):
+		"""get segments by appending sentences"""
+		max_char = args.max_src_ntokens - len(entity_name) - len(title) - 2  # - sentence_num * 2
+		sentences = [title + '。'] + sentences
+		segments = []
+		segment = ''
+		i = 0
+		cur_sent_num = 0
+		while i <= len(sentences):
+			if i == len(sentences):
+				if len(segment) >= args.min_src_ntokens:
+					segments.append(entity_name + '。' + segment)
+				i += 1
+				break
+			if sentences[i] == '': continue
+			eachsent = sentences[i] + '。'
+			# eachsent = eachsent
+			eachsent = eachsent.replace(' ', '')
+			eachsent = eachsent.replace('\n', '')
+			eachsent = eachsent.replace('\t', '')
+			if len(segment) + len(eachsent) <= max_char - cur_sent_num * 2:  # each sent has [sep],[cls]
+				segment += eachsent
+				i += 1
+				cur_sent_num += 1
+			else:
+				segments.append(entity_name + '。' + segment)
+				cur_sent_num = 0
+				segment = eachsent
+				i += 1
+		return segments
 
+	def get_segments_by_entity(self, sentences, args, entity_name, title):
+		"""get segments by the location of entities"""
+		max_char = args.max_src_ntokens - len(entity_name) - len(title) - 2
+		segments = []
+		# segment = ''
+		seg_char = '。'
+		all_sentencs = seg_char.join(sentences)
+		all_sentencs = title + all_sentencs
+		all_sentencs = all_sentencs.replace(' ', '')
+		all_sentencs = all_sentencs.replace('\n', '')
+		all_sentencs = all_sentencs.replace('\t', '')
+		if len(all_sentencs) <= max_char:
+			return [entity_name + seg_char + title + seg_char + all_sentencs]
+		entity_start_id =[]
+		for i, char in enumerate(all_sentencs):
+			if char == entity_name[0]:
+				if all_sentencs[i:i+len(entity_name)] == entity_name:
+					entity_start_id.append(i)
+			continue
+		for id in entity_start_id:
+			l_id = id - (max_char-len(entity_name)) // 2
+			r_id = id + (max_char-len(entity_name)) // 2
+			if l_id < 0:
+				segment = all_sentencs[0:max_char]
+			elif r_id > len(all_sentencs):
+				segment = all_sentencs[len(all_sentencs)-max_char:-1]
+			else:
+				segment = all_sentencs[l_id:r_id+1]
+			sentence_num = segment.count(seg_char) + 2
+
+			segment = segment[sentence_num:(len(segment)-sentence_num)]
+			segment = entity_name + seg_char + segment
+			segments.append(segment)
+
+		return segments
+
+
+def process_lie_segment(line_json, datasets, bert):
+	Seg = Segments()
 	emotion_dict = {'NORM': 1, 'NEG': 0, 'POS': 2}  # 0,-1,1
 	# emotion_dict = {"正向": 1, "负向": -1, "中性": 0}  #
 	title = line_json["title"]  # title 作为一个句子
 	content = line_json["content"].replace('\n', '').replace('\r', '')
-	# for news.xlsx
-	# entities = str(line_json["corporations"]).split('、')
-	# emotions = line_json['emotion'].split('、')
-	# for i in range(len(entities)):
-	# 	entity_name = entities[i]
-	# 	entity_emotion = emotions[i]
 	for entity in line_json["coreEntityEmotions"]:
 		entity_name = entity["entity"]
 		entity_emotion = entity["emotion"]
 		# process content, each sentence
 		sentences = content.split('。')  # re.split('([。])', content)
-		sentences = [entity_name] + [title] + sentences  # +'。'
-		sentence_num = len(sentences)
-		max_char = args.max_src_ntokens - sentence_num * 2
-		segments = []
-		segment = ''
-		i = 0
-		while i <= sentence_num:
-			if i == sentence_num:
-				if len(segment) >= args.min_src_ntokens:
-					segments.append(segment)
-				i += 1
-				break
-			eachsent = sentences[i] + '。'
-			if len(segment) + len(eachsent) < max_char:
-				segment += eachsent
-				i += 1
-			else:
-				segments.append(segment)
-				segment = entity_name + '。' + title + '。' + eachsent
-				i += 1
-
-		jieba.add_word(entity_name)
+		# sentences = [entity_name] + [title] + sentences  # +'。'
+		# sentence_num = len(sentences)
+		segments = Seg.get_segments(sentences, args, entity_name, title)
+		# segments = Seg.get_segments_by_entity(sentences, args, entity_name, title)
+		# jieba.add_word(entity_name)
 
 		for segment in segments:
 			# if entity_name in segment:
-			segment = segment.replace(' ', '')
-			segment = segment.replace('\n', '')
-			segment = segment.replace('\t', '')
 			# res += segment + '\n' + entity_name + '\n' + str(emotion_dict[entity_emotion]) + '\n'
-			segemnt_cut = jieba.cut(segment)
-			content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
-			content_str = ' '.join(content_cut_list)
+			# segemnt_cut = jieba.cut(segment)
+			# content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
+			# content_str = ' '.join(content_cut_list)
 
-			b_data = bert.preprocess([i for i in content_str.split('。') if i], emotion_dict[entity_emotion])
+			b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
 			if b_data is None:
 				print(line_json["newsId"])
 				continue
@@ -130,8 +173,6 @@ def process_lie_segment(line_json, datasets, bert):
 
 
 def process_lie_segment_test(line_json, datasets, bert):
-
-	# emotion_dict = {'NORM': 1, 'NEG': 0, 'POS': 2}  # 0,-1,1
 	emotion_dict = {"正向": 2, "负向": 0, "中性": 1}  # 1, -1, 0
 	title = line_json["title"]  # title 作为一个句子
 	content = line_json["content"].replace('\n', '').replace('\r', '')
@@ -141,45 +182,23 @@ def process_lie_segment_test(line_json, datasets, bert):
 	for i in range(len(entities)):
 		entity_name = entities[i]
 		entity_emotion = emotions[i]
-		# for entity in line_json["coreEntityEmotions"]:
-		# 	entity_name = entity["entity"]
-		# 	entity_emotion = entity["emotion"]
 		# process content, each sentence
 		sentences = content.split('。')  # re.split('([。])', content)
 		sentences = [entity_name] + [title] + sentences  # +'。'
-		sentence_num = len(sentences)
-		max_char = args.max_src_ntokens - sentence_num * 2
-		segments = []
-		segment = ''
-		i = 0
-		while i <= sentence_num:
-			if i == sentence_num:
-				if len(segment) >= args.min_src_ntokens:
-					segments.append(segment)
-				i += 1
-				break
-			eachsent = sentences[i] + '。'
-			if len(segment) + len(eachsent) < max_char:
-				segment += eachsent
-				i += 1
-			else:
-				segments.append(segment)
-				segment = entity_name + '。' + title + '。' + eachsent
-				i += 1
+		# sentence_num = len(sentences)
+		# max_char = args.max_src_ntokens - sentence_num * 2
+		segments = Segments.get_segments(sentences, args, entity_name, title)
 
 		jieba.add_word(entity_name)
 
 		for segment in segments:
 			# if entity_name in segment:
-			segment = segment.replace(' ', '')
-			segment = segment.replace('\n', '')
-			segment = segment.replace('\t', '')
 			# res += segment + '\n' + entity_name + '\n' + str(emotion_dict[entity_emotion]) + '\n'
-			segemnt_cut = jieba.cut(segment)
-			content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
-			content_str = ' '.join(content_cut_list)
+			# segemnt_cut = jieba.cut(segment)
+			# content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
+			# content_str = ' '.join(content_cut_list)
 
-			b_data = bert.preprocess([i for i in content_str.split('。') if i], emotion_dict[entity_emotion])
+			b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
 			if b_data is None:
 				print(line_json["corporations"])
 				continue
@@ -198,7 +217,7 @@ if __name__ == '__main__':
 	parser.add_argument("--input_file", default='../data/demo_data.json')
 	parser.add_argument("--save_path", default='../data/')
 	parser.add_argument("--model_path", default='../bert-base-chinese', type=str, help="The pre-trained model path")
-	parser.add_argument('--do_basic_tokenize', default=False, action='store_true')
+	parser.add_argument('--do_basic_tokenize', default=True, action='store_true')
 	parser.add_argument('--test_data', default=False, help="whether the input is a xlsx test data")
 	# parser.add_argument("-shard_size", default=2000, type=int)
 	# parser.add_argument('-min_nsents', default=3, type=int)
