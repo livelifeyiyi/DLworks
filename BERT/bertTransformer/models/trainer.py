@@ -301,7 +301,7 @@ class Trainer(object):
         """
 		model.eval()
 		stats = Statistics()
-		mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length)
+		mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length, shuffle=False)
 		logger.info('Number of minibatches: %s' % (len(test_dataset) // self.args.batch_size))
 		with torch.no_grad():
 			n_correct = 0.
