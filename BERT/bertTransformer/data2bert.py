@@ -70,7 +70,7 @@ class BertData():
 class Segments:
 	def get_segments(self, sentences, args, entity_name, title):
 		"""get segments by appending sentences"""
-		max_char = args.max_src_ntokens - len(entity_name) - len(title) - 2  # - sentence_num * 2
+		max_char = args.max_src_ntokens - len(entity_name) - 2  # - sentence_num * 2
 		sentences = [title + '。'] + sentences
 		segments = []
 		segment = ''
@@ -101,12 +101,12 @@ class Segments:
 
 	def get_segments_by_entity(self, sentences, args, entity_name, title):
 		"""get segments by the location of entities"""
-		max_char = args.max_src_ntokens - len(entity_name) - len(title) - 2
+		max_char = args.max_src_ntokens - len(entity_name) - 2
 		segments = []
 		# segment = ''
 		seg_char = '。'
 		all_sentencs = seg_char.join(sentences)
-		all_sentencs = title + all_sentencs
+		all_sentencs = title + seg_char + all_sentencs
 		all_sentencs = all_sentencs.replace(' ', '')
 		all_sentencs = all_sentencs.replace('\n', '')
 		all_sentencs = all_sentencs.replace('\t', '')
@@ -173,6 +173,7 @@ def process_lie_segment(line_json, datasets, bert):
 
 
 def process_lie_segment_test(line_json, datasets, bert):
+	Seg = Segments()
 	emotion_dict = {"正向": 2, "负向": 0, "中性": 1}  # 1, -1, 0
 	title = line_json["title"]  # title 作为一个句子
 	content = line_json["content"].replace('\n', '').replace('\r', '')
@@ -187,7 +188,7 @@ def process_lie_segment_test(line_json, datasets, bert):
 		sentences = [entity_name] + [title] + sentences  # +'。'
 		# sentence_num = len(sentences)
 		# max_char = args.max_src_ntokens - sentence_num * 2
-		segments = Segments.get_segments(sentences, args, entity_name, title)
+		segments = Seg.get_segments(sentences, args, entity_name, title)
 
 		jieba.add_word(entity_name)
 
