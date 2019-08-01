@@ -202,7 +202,13 @@ def test(args, device_id, pt):
 	model.load_cp(checkpoint)
 	model.eval()
 
+	logger.info("Test dataset......")
 	test_dataset = torch.load(args.bert_data_path + 'test.data')
+	trainer = build_trainer(args, device_id, model, None)
+	trainer.test(model, test_dataset, device)
+
+	logger.info("Valid dataset......")
+	test_dataset = torch.load(args.bert_data_path + 'valid.data')
 	trainer = build_trainer(args, device_id, model, None)
 	trainer.test(model, test_dataset, device)
 
@@ -306,14 +312,14 @@ if __name__ == '__main__':
 	parser.add_argument('--seed', default=666, type=int)
 
 	parser.add_argument("--check_steps", default=500, type=int)
-	parser.add_argument("-best_model", default='')
+	parser.add_argument("--best_model", default='')
+	parser.add_argument("--inter_layers", default=2, type=int, help="Number of layers in transformer decoder")
 
 	parser.add_argument("--optim", default='adam', type=str)
 	parser.add_argument("-use_interval", type=str2bool, nargs='?', const=True, default=True)
 	parser.add_argument("-hidden_size", default=128, type=int)
 	parser.add_argument("-ff_size", default=512, type=int)
 	parser.add_argument("-heads", default=4, type=int)
-	parser.add_argument("-inter_layers", default=2, type=int)
 	parser.add_argument("-rnn_size", default=512, type=int)
 
 	parser.add_argument("-param_init", default=0, type=float)
