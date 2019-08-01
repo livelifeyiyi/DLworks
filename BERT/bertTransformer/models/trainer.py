@@ -12,6 +12,7 @@ from bertTransformer.models.reporter import ReportMgr
 from bertTransformer.models.stats import Statistics
 from bertTransformer.others.logging import logger
 from bertTransformer.others.utils import test_rouge, rouge_results_to_str
+from bertTransformer.evaluate import Evaluation
 
 
 def _tally_parameters(model):
@@ -308,6 +309,8 @@ class Trainer(object):
 			n_total = 0.
 			target_all = None
 			output_all = None
+			full_pred = []
+			full_label_ids = []
 			for step, batch in enumerate(mini_batches):
 				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
 				if torch.cuda.is_available():
@@ -333,6 +336,9 @@ class Trainer(object):
 				# loss = self.loss(logits, labels)
 				n_correct += (torch.argmax(logits, -1) == labels).sum().item()
 				n_total += len(logits)
+				full_pred.extend(torch.argmax(logits, -1).tolist())
+				full_label_ids.extend(labels.tolist())
+
 				if target_all is None:
 					target_all = labels
 					output_all = logits
@@ -350,6 +356,8 @@ class Trainer(object):
 			pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
 												 target_names=['NEG', 'NEU', 'POS'])
 			logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
+
+			Evaluation.predict_vote(full_pred, full_label_ids)
 			# self._report_step(0, step, valid_stats=stats)
 		return acc
 
