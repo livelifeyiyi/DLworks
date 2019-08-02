@@ -124,32 +124,35 @@ class Segments:
 
 	def get_head_tail(self, sentences, args, entity_name, title):
 		max_char = args.max_src_ntokens - len(entity_name) - len(title) - 2
+		head_len = int(max_char * args.head_percent)
+		tail_len = max_char - head_len
 		segments = []
 		seg_char = '。'
 		all_sentencs = seg_char.join(sentences)
 		if len(all_sentencs) <= max_char:
 			return [entity_name + seg_char + title + seg_char + all_sentencs]
-		entity_start_id =[]
+		entity_start_id = []
 		for i, char in enumerate(all_sentencs):
 			if char == entity_name[0]:
 				if all_sentencs[i:i+len(entity_name)] == entity_name:
 					entity_start_id.append(i)
 			continue
-		l_entity_id = entity_start_id[0]
-		r_entity_id = entity_start_id[-1]
-		head_len = max_char // 2
-		tail_len = max_char // 2
-		# for id in entity_start_id:
-		head_l_id = l_entity_id - (head_len - len(entity_name)) // 2
-		tail_r_id = r_entity_id + (tail_len - len(entity_name)) // 2
-		if head_l_id < 0:
+		if not entity_start_id:
 			head = all_sentencs[0:head_len]
+			tail = all_sentencs[len(all_sentencs) - tail_len:-1]
 		else:
-			head = all_sentencs[head_l_id:head_l_id + head_len]
-		if tail_r_id > len(all_sentencs):
-			tail = all_sentencs[len(all_sentencs)-tail_len:-1]
-		else:
-			tail = all_sentencs[tail_r_id-tail_len:tail_r_id]
+			l_entity_id = entity_start_id[0]
+			r_entity_id = entity_start_id[-1]
+			head_l_id = l_entity_id - (head_len - len(entity_name)) // 2
+			tail_r_id = r_entity_id + (tail_len - len(entity_name)) // 2
+			if head_l_id < 0:
+				head = all_sentencs[0:head_len]
+			else:
+				head = all_sentencs[head_l_id:head_l_id + head_len]
+			if tail_r_id > len(all_sentencs):
+				tail = all_sentencs[len(all_sentencs)-tail_len:-1]
+			else:
+				tail = all_sentencs[tail_r_id-tail_len:tail_r_id]
 		segments.append(entity_name)
 		segments.append(title)
 		segments.append(head)
@@ -316,6 +319,7 @@ if __name__ == '__main__':
 	parser.add_argument('--min_src_ntokens', default=30, type=int)  # drop the segments which are shorter than min_src_ntokens
 	parser.add_argument('--max_src_ntokens', default=510, type=int)
 	parser.add_argument('--mode', default='ht', choices=['sentence', 'entity', 'ht'])
+	parser.add_argument('--head_percent', default='0.25', help='Percentage of head token')
 	# parser.add_argument("-lower", type=str2bool, nargs='?',const=True,default=True)
 
 	parser.add_argument('-log_file', default='../../logs/cnndm.log')
