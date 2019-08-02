@@ -12,7 +12,7 @@ from bertTransformer.models.reporter import ReportMgr
 from bertTransformer.models.stats import Statistics
 from bertTransformer.others.logging import logger
 from bertTransformer.others.utils import test_rouge, rouge_results_to_str
-from bertTransformer.evaluate import Evaluation
+from bertTransformer.evaluate import predict_vote
 
 
 def _tally_parameters(model):
@@ -145,7 +145,8 @@ class Trainer(object):
 
 			logger.info('Getting minibatches')
 			mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
-			logger.info('Number of minibatches: %s' % (len(train_dataset) // self.args.batch_size))
+			batch_num = len(train_dataset) // self.args.batch_size
+			logger.info('Number of minibatches: %s' % batch_num)
 			logger.info('Start training...')
 			for step, batch in enumerate(mini_batches):
 				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
@@ -209,9 +210,12 @@ class Trainer(object):
 				report_stats.update(batch_stats)
 
 				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total / n_total, n_correct / n_total))
-				if step != 0 and step % self.check_steps == 0:
+				if step % self.check_steps == 0 or step == batch_num:
+					valid_acc_2 = 0
 					valid_acc = self.test(self.model, test_dataset, device)
-					if valid_acc > self.best_acc:
+					if self.args.do_use_second_dataset:
+						valid_acc_2 = self.test(self.model, torch.load(self.args.second_dataset_path + 'test.data'), device)
+					if valid_acc > self.best_acc or valid_acc_2 > self.best_acc:
 						self.best_acc = valid_acc
 						self._save(str(self.args.model_name)+str(self.args.lr)+'valid', epoch, self.best_acc)
 				# 	self._save(epoch, step)
@@ -219,10 +223,10 @@ class Trainer(object):
 
 				# in case of multi step gradient accumulation,
 				# update only after accum batches
-			valid_acc = self.test(self.model, test_dataset, device)
+			# valid_acc = self.test(self.model, test_dataset, device)
 			# if valid_acc > self.best_acc:
 			# 	self.best_acc = valid_acc
-			self._save(str(self.args.model_name)+str(self.args.lr), epoch, valid_acc)
+			# self._save(str(self.args.model_name)+str(self.args.lr), epoch, valid_acc)
 			if self.grad_accum_count > 1:
 				if self.n_gpu > 1:
 					grads = [p.grad.data for p in self.model.parameters()
@@ -355,9 +359,9 @@ class Trainer(object):
 			acc = n_correct / n_total
 			pred_res = metrics.classification_report(target_all.cpu(), torch.argmax(output_all, -1).cpu(),
 												 target_names=['NEG', 'NEU', 'POS'])
-			logger.info('Prediction results for test dataset: \n{}'.format(pred_res))
+			logger.info('Prediction results: \n{}'.format(pred_res))
 
-			Evaluation.predict_vote(full_pred, full_label_ids)
+			predict_vote(full_pred, full_label_ids, test_dataset)
 			# self._report_step(0, step, valid_stats=stats)
 		return acc
 

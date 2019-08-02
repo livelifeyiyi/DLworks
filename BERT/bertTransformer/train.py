@@ -195,7 +195,7 @@ def test(args, device_id, pt):
 	for k in opt.keys():
 		if k in model_flags:
 			setattr(args, k, opt[k])
-	print(args)
+	# print(args)
 
 	config = BertConfig.from_json_file(args.bert_config_path)
 	model = Summarizer(args, device, load_pretrained_bert=False, bert_config=config)
@@ -247,6 +247,8 @@ def train(args, device_id):
 	# 								  shuffle=True, is_test=False)
 
 	train_dataset = torch.load(args.bert_data_path + 'train.data')
+	if args.do_use_second_dataset:
+		train_dataset += torch.load(args.second_dataset_path + 'train.data')
 	logger.info('Loading training dataset from %s, number of examples: %d' %
 				(args.bert_data_path, len(train_dataset)))
 
@@ -314,6 +316,9 @@ if __name__ == '__main__':
 	parser.add_argument("--check_steps", default=500, type=int)
 	parser.add_argument("--best_model", default='')
 	parser.add_argument("--inter_layers", default=2, type=int, help="Number of layers in transformer decoder")
+
+	parser.add_argument("--do_use_second_dataset", default=False)
+	parser.add_argument("--second_dataset_path", default="./bert_data_char_title_entity")
 
 	parser.add_argument("--optim", default='adam', type=str)
 	parser.add_argument("-use_interval", type=str2bool, nargs='?', const=True, default=True)
