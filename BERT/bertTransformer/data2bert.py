@@ -7,6 +7,7 @@ import pandas as pd
 import jieba
 import torch
 from pytorch_pretrained_bert import BertTokenizer
+import bertTransformer.preProcess as preProcess
 # import logging
 #
 # logger = logging.getLogger()
@@ -66,6 +67,26 @@ class BertData():
 		# src_txt = [original_src_txt[i] for i in idxs]
 		return src_subtoken_idxs, label, segments_ids, cls_ids, src
 
+	def pre_head_tail(self, src):
+		"""src:[entity, title, head, tail]"""
+		if len(src) == 0:
+			return None
+		text = ' [SEP] '.join(src)
+		src_subtokens = self.tokenizer.tokenize(text)
+		if len(src_subtokens) > args.max_src_ntokens - 2:
+			src_subtokens = src_subtokens[:(args.max_src_ntokens - 2)]
+		src_subtokens = ['[CLS]'] + src_subtokens + ['[SEP]']
+		src_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(src_subtokens)
+		_segs = [-1] + [i for i, t in enumerate(src_subtoken_idxs) if t == self.sep_vid]
+		segs = [_segs[i] - _segs[i - 1] for i in range(1, len(_segs))]
+		segments_ids = []
+		for i, s in enumerate(segs):
+			if i % 2 == 0:
+				segments_ids += s * [0]
+			else:
+				segments_ids += s * [1]
+		return src_subtoken_idxs, segments_ids, src
+
 
 class Segments:
 	def get_segments(self, sentences, args, entity_name, title):
@@ -99,6 +120,40 @@ class Segments:
 				cur_sent_num = 0
 				segment = eachsent
 				i += 1
+		return segments
+
+	def get_head_tail(self, sentences, args, entity_name, title):
+		max_char = args.max_src_ntokens - len(entity_name) - len(title) - 2
+		segments = []
+		seg_char = '。'
+		all_sentencs = seg_char.join(sentences)
+		if len(all_sentencs) <= max_char:
+			return [entity_name + seg_char + title + seg_char + all_sentencs]
+		entity_start_id =[]
+		for i, char in enumerate(all_sentencs):
+			if char == entity_name[0]:
+				if all_sentencs[i:i+len(entity_name)] == entity_name:
+					entity_start_id.append(i)
+			continue
+		l_entity_id = entity_start_id[0]
+		r_entity_id = entity_start_id[-1]
+		head_len = max_char // 2
+		tail_len = max_char // 2
+		# for id in entity_start_id:
+		head_l_id = l_entity_id - (head_len - len(entity_name)) // 2
+		tail_r_id = r_entity_id + (tail_len - len(entity_name)) // 2
+		if head_l_id < 0:
+			head = all_sentencs[0:head_len]
+		else:
+			head = all_sentencs[head_l_id:head_l_id + head_len]
+		if tail_r_id > len(all_sentencs):
+			tail = all_sentencs[len(all_sentencs)-tail_len:-1]
+		else:
+			tail = all_sentencs[tail_r_id-tail_len:tail_r_id]
+		segments.append(entity_name)
+		segments.append(title)
+		segments.append(head)
+		segments.append(tail)
 		return segments
 
 	def get_segments_by_entity(self, sentences, args, entity_name, title):
@@ -154,6 +209,7 @@ def process_lie_segment(line_json, datasets, bert):
 	# emotion_dict = {"正向": 1, "负向": -1, "中性": 0}  #
 	title = line_json["title"]  # title 作为一个句子
 	content = line_json["content"].replace('\n', '').replace('\r', '')
+	content = preProcess.clean_line(content)
 	for entity in line_json["coreEntityEmotions"]:
 		entity_name = entity["entity"]
 		entity_emotion = entity["emotion"]
@@ -165,6 +221,8 @@ def process_lie_segment(line_json, datasets, bert):
 			segments = Seg.get_segments(sentences, args, entity_name, title)
 		if args.mode == 'entity':
 			segments = Seg.get_segments_by_entity(sentences, args, entity_name, title)
+		if args.mode == 'ht':
+			segments = Seg.get_head_tail(sentences, args, entity_name, title)
 
 		# jieba.add_word(entity_name)
 
@@ -175,13 +233,19 @@ def process_lie_segment(line_json, datasets, bert):
 			# content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
 			# content_str = ' '.join(content_cut_list)
 
-			b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
-			if b_data is None:
-				print(line_json["newsId"])
-				continue
-			indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
-			b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
-			               'src_txt': src_txt}
+			if args.mode == 'sentence' or args.mode == 'entity':
+				b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
+				if b_data is None:
+					print(line_json["corporations"])
+					continue
+				indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
+				b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
+							   'src_txt': src_txt}
+			if args.mode == 'ht':
+				b_data = bert.pre_head_tail(segments)
+				indexed_tokens, segments_ids, src_txt = b_data
+				b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion], 'src_txt': src_txt}
+
 			datasets.append(b_data_dict)
 
 	return datasets
@@ -211,7 +275,8 @@ def process_lie_segment_test(line_json, datasets, bert):
 			segments = Seg.get_segments(sentences, args, entity_name, title)
 		if args.mode == 'entity':
 			segments = Seg.get_segments_by_entity(sentences, args, entity_name, title)
-
+		if args.mode == 'ht':
+			segments = Seg.get_head_tail(sentences, args, entity_name, title)
 		# jieba.add_word(entity_name)
 
 		for segment in segments:
@@ -220,14 +285,18 @@ def process_lie_segment_test(line_json, datasets, bert):
 			# segemnt_cut = jieba.cut(segment)
 			# content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
 			# content_str = ' '.join(content_cut_list)
-
-			b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
-			if b_data is None:
-				print(line_json["corporations"])
-				continue
-			indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
-			b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
-			               'src_txt': src_txt}
+			if args.mode == 'sentence' or args.mode == 'entity':
+				b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
+				if b_data is None:
+					print(line_json["corporations"])
+					continue
+				indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
+				b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
+							   'src_txt': src_txt}
+			if args.mode == 'ht':
+				b_data = bert.pre_head_tail(segments)
+				indexed_tokens, segments_ids = b_data
+				b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion]}
 			datasets.append(b_data_dict)
 
 	return datasets
@@ -235,7 +304,6 @@ def process_lie_segment_test(line_json, datasets, bert):
 
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
-	# parser.add_argument("-mode", default='../bert-base-chinese', type=str, help='format_to_lines or format_to_bert')
 	# parser.add_argument("-map_path", default='../data/')
 	parser.add_argument("--input_file", default='../data/demo_data.json')
 	parser.add_argument("--save_path", default='../data/')
@@ -246,8 +314,8 @@ if __name__ == '__main__':
 	# parser.add_argument('-min_nsents', default=3, type=int)
 	# parser.add_argument('-max_nsents', default=100, type=int)
 	parser.add_argument('--min_src_ntokens', default=30, type=int)  # drop the segments which are shorter than min_src_ntokens
-	parser.add_argument('--max_src_ntokens', default=512, type=int)
-	parser.add_argument('--mode', default='sentence', choices=['sentence', 'entity'])
+	parser.add_argument('--max_src_ntokens', default=510, type=int)
+	parser.add_argument('--mode', default='ht', choices=['sentence', 'entity', 'ht'])
 	# parser.add_argument("-lower", type=str2bool, nargs='?',const=True,default=True)
 
 	parser.add_argument('-log_file', default='../../logs/cnndm.log')
