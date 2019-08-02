@@ -71,7 +71,7 @@ class Segments:
 	def get_segments(self, sentences, args, entity_name, title):
 		"""get segments by appending sentences"""
 		max_char = args.max_src_ntokens - len(entity_name) - 2  # - sentence_num * 2
-		sentences = [title + '。'] + sentences
+		sentences = [title] + sentences
 		segments = []
 		segment = ''
 		i = 0
@@ -82,7 +82,9 @@ class Segments:
 					segments.append(entity_name + '。' + segment)
 				i += 1
 				break
-			if sentences[i] == '': continue
+			if sentences[i] == '':
+				i += 1
+				continue
 			eachsent = sentences[i] + '。'
 			# eachsent = eachsent
 			eachsent = eachsent.replace(' ', '')
@@ -118,13 +120,23 @@ class Segments:
 				if all_sentencs[i:i+len(entity_name)] == entity_name:
 					entity_start_id.append(i)
 			continue
+		is_lid = False
+		is_rid = False  # 避免重复取开头和结尾
 		for id in entity_start_id:
 			l_id = id - (max_char-len(entity_name)) // 2
 			r_id = id + (max_char-len(entity_name)) // 2
 			if l_id < 0:
-				segment = all_sentencs[0:max_char]
+				if not is_lid:
+					segment = all_sentencs[0:max_char]
+					is_lid = True
+				else:
+					continue
 			elif r_id > len(all_sentencs):
-				segment = all_sentencs[len(all_sentencs)-max_char:-1]
+				if not is_rid:
+					segment = all_sentencs[len(all_sentencs)-max_char:-1]
+					is_rid = True
+				else:
+					continue
 			else:
 				segment = all_sentencs[l_id:r_id+1]
 			sentence_num = segment.count(seg_char) + 2
@@ -149,8 +161,11 @@ def process_lie_segment(line_json, datasets, bert):
 		sentences = content.split('。')  # re.split('([。])', content)
 		# sentences = [entity_name] + [title] + sentences  # +'。'
 		# sentence_num = len(sentences)
-		segments = Seg.get_segments(sentences, args, entity_name, title)
-		# segments = Seg.get_segments_by_entity(sentences, args, entity_name, title)
+		if args.mode == 'sentence':
+			segments = Seg.get_segments(sentences, args, entity_name, title)
+		if args.mode == 'entity':
+			segments = Seg.get_segments_by_entity(sentences, args, entity_name, title)
+
 		# jieba.add_word(entity_name)
 
 		for segment in segments:
@@ -182,15 +197,22 @@ def process_lie_segment_test(line_json, datasets, bert):
 	emotions = line_json['emotion'].split('、')
 	for i in range(len(entities)):
 		entity_name = entities[i]
-		entity_emotion = emotions[i]
+		if i >= len(emotions):
+			print(entity_name)
+			entity_emotion = emotions[0]
+		else:
+			entity_emotion = emotions[i]
 		# process content, each sentence
 		sentences = content.split('。')  # re.split('([。])', content)
 		sentences = [entity_name] + [title] + sentences  # +'。'
 		# sentence_num = len(sentences)
 		# max_char = args.max_src_ntokens - sentence_num * 2
-		segments = Seg.get_segments(sentences, args, entity_name, title)
+		if args.mode == 'sentence':
+			segments = Seg.get_segments(sentences, args, entity_name, title)
+		if args.mode == 'entity':
+			segments = Seg.get_segments_by_entity(sentences, args, entity_name, title)
 
-		jieba.add_word(entity_name)
+		# jieba.add_word(entity_name)
 
 		for segment in segments:
 			# if entity_name in segment:
@@ -225,7 +247,7 @@ if __name__ == '__main__':
 	# parser.add_argument('-max_nsents', default=100, type=int)
 	parser.add_argument('--min_src_ntokens', default=30, type=int)  # drop the segments which are shorter than min_src_ntokens
 	parser.add_argument('--max_src_ntokens', default=512, type=int)
-
+	parser.add_argument('--mode', default='sentence', choices=['sentence', 'entity'])
 	# parser.add_argument("-lower", type=str2bool, nargs='?',const=True,default=True)
 
 	parser.add_argument('-log_file', default='../../logs/cnndm.log')
@@ -267,4 +289,4 @@ if __name__ == '__main__':
 		print('Saving test data to %s' % args.save_path)
 		torch.save(datasets, args.save_path + 'test.data')
 		total_num = len(datasets)
-		print('Number of document: %s, Number of data :%s' % (df.shape[1], total_num))
+		print('Number of document: %s, Number of data :%s' % (df.shape[0], total_num))
