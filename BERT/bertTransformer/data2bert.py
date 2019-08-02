@@ -229,14 +229,14 @@ def process_lie_segment(line_json, datasets, bert):
 
 		# jieba.add_word(entity_name)
 
-		for segment in segments:
-			# if entity_name in segment:
+		if args.mode == 'sentence' or args.mode == 'entity':
+			for segment in segments:
+				# if entity_name in segment:
 			# res += segment + '\n' + entity_name + '\n' + str(emotion_dict[entity_emotion]) + '\n'
 			# segemnt_cut = jieba.cut(segment)
 			# content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
 			# content_str = ' '.join(content_cut_list)
 
-			if args.mode == 'sentence' or args.mode == 'entity':
 				b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
 				if b_data is None:
 					print(line_json["corporations"])
@@ -244,12 +244,13 @@ def process_lie_segment(line_json, datasets, bert):
 				indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
 				b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
 							   'src_txt': src_txt}
-			if args.mode == 'ht':
-				b_data = bert.pre_head_tail(segments)
-				indexed_tokens, segments_ids, src_txt = b_data
-				b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion], 'src_txt': src_txt}
-
 			datasets.append(b_data_dict)
+		if args.mode == 'ht':
+			b_data = bert.pre_head_tail(segments)
+			indexed_tokens, segments_ids, src_txt = b_data
+			b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion], 'src_txt': src_txt}
+
+		datasets.append(b_data_dict)
 
 	return datasets
 
@@ -298,8 +299,9 @@ def process_lie_segment_test(line_json, datasets, bert):
 							   'src_txt': src_txt}
 			if args.mode == 'ht':
 				b_data = bert.pre_head_tail(segments)
-				indexed_tokens, segments_ids = b_data
-				b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion]}
+				indexed_tokens, segments_ids, src_txt = b_data
+				b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion],
+							   'src_txt': src_txt}
 			datasets.append(b_data_dict)
 
 	return datasets
@@ -319,7 +321,8 @@ if __name__ == '__main__':
 	parser.add_argument('--min_src_ntokens', default=30, type=int)  # drop the segments which are shorter than min_src_ntokens
 	parser.add_argument('--max_src_ntokens', default=510, type=int)
 	parser.add_argument('--mode', default='ht', choices=['sentence', 'entity', 'ht'])
-	parser.add_argument('--head_percent', default='0.25', help='Percentage of head token')
+	parser.add_argument('--head_percent', default='0.25', type=float, help='Percentage of head token')
+	parser.add_argument('--valid_percent', default='0.1', type=float, help='Percentage of valid dataset')
 	# parser.add_argument("-lower", type=str2bool, nargs='?',const=True,default=True)
 
 	parser.add_argument('-log_file', default='../../logs/cnndm.log')
@@ -343,9 +346,9 @@ if __name__ == '__main__':
 			for each in data:
 				datasets = process_lie_segment(each, datasets, bert)
 				count += 1
-				if count == len(data) // 10:
+				if count == len(data) // args.valid_percent:
 					print(count)
-					print('Saving validation set to %s' % args.save_path)
+					print('Saving validation set to %s, number of data: %s' % (args.save_path, len(datasets)))
 					torch.save(datasets, args.save_path + 'valid.data')
 					datasets = []
 
