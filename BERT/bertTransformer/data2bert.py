@@ -47,7 +47,7 @@ class BertData():
 		# text = [_clean(t) for t in text]
 		text = '。 [SEP] [CLS] '.join(src)
 		src_subtokens = self.tokenizer.tokenize(text)
-		if len(src_subtokens) > args.max_src_ntokens - 2:
+		if len(src_subtokens) > args.max_src_ntokens:
 			src_subtokens = src_subtokens[:(args.max_src_ntokens-2)]
 		src_subtokens = ['[CLS]'] + src_subtokens + ['[SEP]']
 
@@ -65,6 +65,9 @@ class BertData():
 
 		# tgt_txt = '<q>'.join([' '.join(tt) for tt in tgt])
 		# src_txt = [original_src_txt[i] for i in idxs]
+		src_subtoken_idxs += [self.pad_vid] * (args.max_src_ntokens + 2 - len(src_subtoken_idxs))
+		segments_ids += [self.pad_vid] * (args.max_src_ntokens + 2 - len(segments_ids))
+
 		return src_subtoken_idxs, label, segments_ids, cls_ids, src
 
 	def pre_head_tail(self, src):
@@ -77,6 +80,7 @@ class BertData():
 			src_subtokens = src_subtokens[:(args.max_src_ntokens - 2)]
 		src_subtokens = ['[CLS]'] + src_subtokens + ['[SEP]']
 		src_subtoken_idxs = self.tokenizer.convert_tokens_to_ids(src_subtokens)
+
 		_segs = [-1] + [i for i, t in enumerate(src_subtoken_idxs) if t == self.sep_vid]
 		segs = [_segs[i] - _segs[i - 1] for i in range(1, len(_segs))]
 		segments_ids = []
@@ -85,6 +89,9 @@ class BertData():
 				segments_ids += s * [0]
 			else:
 				segments_ids += s * [1]
+
+		src_subtoken_idxs += [self.pad_vid] * (args.max_src_ntokens+2 - len(src_subtoken_idxs))
+		segments_ids += [self.pad_vid] * (args.max_src_ntokens+2 - len(segments_ids))
 		return src_subtoken_idxs, segments_ids, src
 
 
@@ -354,7 +361,7 @@ if __name__ == '__main__':
 					datasets = []
 
 			print('Saving training data to %s' % args.save_path)
-			torch.save(datasets, args.save_path + 'train.data')
+			torch.save(datasets, args.save_path + 'train_ht.data')
 			total_num = len(datasets)
 			print('Number of document: %s, Number of data :%s' % (count, total_num))
 
