@@ -250,7 +250,7 @@ def process_lie_segment(line_json, datasets, bert):
 			indexed_tokens, segments_ids, src_txt = b_data
 			b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion], 'src_txt': src_txt}
 
-		datasets.append(b_data_dict)
+			datasets.append(b_data_dict)
 
 	return datasets
 
@@ -283,13 +283,13 @@ def process_lie_segment_test(line_json, datasets, bert):
 			segments = Seg.get_head_tail(sentences, args, entity_name, title)
 		# jieba.add_word(entity_name)
 
-		for segment in segments:
-			# if entity_name in segment:
+		if args.mode == 'sentence' or args.mode == 'entity':
+			for segment in segments:
+				# if entity_name in segment:
 			# res += segment + '\n' + entity_name + '\n' + str(emotion_dict[entity_emotion]) + '\n'
 			# segemnt_cut = jieba.cut(segment)
 			# content_cut_list = [word for word in segemnt_cut if word and word != ' ' and word != '\n' and word!='\t']
 			# content_str = ' '.join(content_cut_list)
-			if args.mode == 'sentence' or args.mode == 'entity':
 				b_data = bert.preprocess([i for i in segment.split('。') if i], emotion_dict[entity_emotion])
 				if b_data is None:
 					print(line_json["corporations"])
@@ -297,10 +297,11 @@ def process_lie_segment_test(line_json, datasets, bert):
 				indexed_tokens, labels, segments_ids, cls_ids, src_txt = b_data
 				b_data_dict = {"src": indexed_tokens, "labels": labels, "segs": segments_ids, 'clss': cls_ids,
 							   'src_txt': src_txt}
-			if args.mode == 'ht':
-				b_data = bert.pre_head_tail(segments)
-				indexed_tokens, segments_ids, src_txt = b_data
-				b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion],
+				datasets.append(b_data_dict)
+		if args.mode == 'ht':
+			b_data = bert.pre_head_tail(segments)
+			indexed_tokens, segments_ids, src_txt = b_data
+			b_data_dict = {"src": indexed_tokens, "segs": segments_ids, "labels": emotion_dict[entity_emotion],
 							   'src_txt': src_txt}
 			datasets.append(b_data_dict)
 
