@@ -167,6 +167,12 @@ def create_masked_lm_predictions(tokens, masked_lm_prob, max_predictions_per_seq
 
     return tokens, mask_indices, masked_token_labels
 
+def is_all_chinese(strs):
+    for _char in strs:
+        if not '\u4e00' <= _char <= '\u9fa5':
+            return False
+    return True
+
 
 def create_instances_from_document(
         doc_database, doc_idx, max_seq_length, short_seq_prob,
@@ -252,8 +258,13 @@ def create_instances_from_document(
                 tokens, masked_lm_positions, masked_lm_labels = create_masked_lm_predictions(
                     tokens, masked_lm_prob, max_predictions_per_seq, whole_word_mask, vocab_list)
                 # strip the '##' token for further training
+<<<<<<< HEAD
                 # tokens_nosharp = [each.replace('##', '') if not each.strip('##').isalnum() else each for each in tokens]
                 # masked_lm_labels = [each.replace('##', '') if not each.strip('##').isalnum() else each for each in masked_lm_labels]
+=======
+                tokens_nosharp = [each.replace('##', '') if is_all_chinese(each.strip('##')) else each for each in tokens]
+                masked_lm_labels = [each.replace('##', '') if is_all_chinese(each.strip('##')) else each for each in masked_lm_labels]
+>>>>>>> 166dd4bfac6c60b27bdb2782601c84f65254a35c
                 instance = {
                     "tokens": tokens,
                     "segment_ids": segment_ids,
