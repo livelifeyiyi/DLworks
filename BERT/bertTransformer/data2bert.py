@@ -261,7 +261,7 @@ def process_lie_segment(line_json, datasets, bert):
 			               'src_txt': src_txt}
 			datasets.append(b_data_dict)
 		if args.mode == 'ht_sentence':
-			b_data = bert.preprocess([i for i in segments.split('。') if i], emotion_dict[entity_emotion])
+			b_data = bert.preprocess(segments, emotion_dict[entity_emotion])
 			if b_data is None:
 				print(line_json["corporations"])
 				continue
@@ -381,7 +381,7 @@ if __name__ == '__main__':
 					datasets = []
 
 			print('Saving training data to %s' % args.save_path)
-			torch.save(datasets, args.save_path + 'train_ht.data')
+			torch.save(datasets, args.save_path + 'train.data')
 			total_num = len(datasets)
 			print('Number of document: %s, Number of data :%s' % (count, total_num))
 
