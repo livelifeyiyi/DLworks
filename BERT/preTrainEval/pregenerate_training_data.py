@@ -252,9 +252,10 @@ def create_instances_from_document(
                 tokens, masked_lm_positions, masked_lm_labels = create_masked_lm_predictions(
                     tokens, masked_lm_prob, max_predictions_per_seq, whole_word_mask, vocab_list)
                 # strip the '##' token for further training
-                tokens_nosharp = [each.replace('##', '') for each in tokens]
+                # tokens_nosharp = [each.replace('##', '') if not each.strip('##').isalnum() else each for each in tokens]
+                # masked_lm_labels = [each.replace('##', '') if not each.strip('##').isalnum() else each for each in masked_lm_labels]
                 instance = {
-                    "tokens": tokens_nosharp,  # tokens,
+                    "tokens": tokens,
                     "segment_ids": segment_ids,
                     "is_random_next": is_random_next,
                     "masked_lm_positions": masked_lm_positions,
