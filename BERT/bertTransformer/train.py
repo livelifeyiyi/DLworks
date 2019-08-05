@@ -12,6 +12,7 @@ import signal
 import time
 
 import torch
+from torch.utils.data import DataLoader
 from pytorch_pretrained_bert import BertConfig, optimization
 
 import bertTransformer.distributed as distributed
@@ -246,12 +247,12 @@ def train(args, device_id):
 	# 	return data_loader.Dataloader(args, load_dataset(args, 'train', shuffle=True), args.batch_size, device,
 	# 								  shuffle=True, is_test=False)
 
-	train_dataset = torch.load(args.bert_data_path + 'train.data')
+	train_dataset = torch.load(args.bert_data_path + 'train_ht.data')
 	if args.do_use_second_dataset:
 		train_dataset += torch.load(args.second_dataset_path + 'train.data')
 	logger.info('Loading training dataset from %s, number of examples: %d' %
 				(args.bert_data_path, len(train_dataset)))
-
+	train_dataloader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True)
 	model = Summarizer(args, device, load_pretrained_bert=True)
 	# if args.train_from != '':
 	# 	logger.info('Loading checkpoint from %s' % args.train_from)
@@ -270,7 +271,7 @@ def train(args, device_id):
 
 	logger.info(model)
 	trainer = build_trainer(args, device_id, model, optim)
-	trainer.train(train_dataset, device)
+	trainer.train(train_dataloader, device)
 
 	if args.do_test:
 		model = trainer.model
@@ -318,7 +319,7 @@ if __name__ == '__main__':
 	parser.add_argument("--inter_layers", default=2, type=int, help="Number of layers in transformer decoder")
 
 	parser.add_argument("--do_use_second_dataset", default=False)
-	parser.add_argument("--second_dataset_path", default="./bert_data_char_title_entity")
+	parser.add_argument("--second_dataset_path", default="./bert_data_char_title_entity/")
 
 	parser.add_argument("--optim", default='adam', type=str)
 	parser.add_argument("-use_interval", type=str2bool, nargs='?', const=True, default=True)

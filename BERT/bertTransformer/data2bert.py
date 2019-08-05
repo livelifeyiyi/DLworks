@@ -354,7 +354,7 @@ if __name__ == '__main__':
 			for each in data:
 				datasets = process_lie_segment(each, datasets, bert)
 				count += 1
-				if count == len(data) // args.valid_percent:
+				if count == int(len(data) * args.valid_percent):
 					print(count)
 					print('Saving validation set to %s, number of data: %s' % (args.save_path, len(datasets)))
 					torch.save(datasets, args.save_path + 'valid.data')

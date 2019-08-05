@@ -2,19 +2,18 @@ from sklearn import metrics
 from bertTransformer.others.logging import logger
 
 
-class Evaluation():
-	def predict_vote(self, pred_labels, label_ids, test_dataset):
+def predict_vote(pred_labels, label_ids, test_dataloader):
 
 		act_pred_label = {}  # id:{'entity': '', 'emotion': 0/1/-1, 'predictions': []}
 		prev_entity = ""
 		# "pred: %s, act: %s" % (pred_labels[i] - 1, label_ids[i] - 1)
 
 		doc_id = 0
-		for i in range(0, len(test_dataset)):
+		for i, test_dataset in enumerate(test_dataloader):
 			# pred_id = int(i / 3)
-			doc = test_dataset[i]['src_text']
+			doc = test_dataset['src_txt']
 			entity = doc[0]
-			polarity = test_dataset[i]['labels']
+			polarity = test_dataset['labels']
 			assert int(polarity) == (label_ids[i])
 			# print(polarity_str, label_ids[pred_id] - 1)
 			if prev_entity == "" or entity != prev_entity:
@@ -38,10 +37,10 @@ class Evaluation():
 			predic_labels = each_pred['predictions']
 			act_label = each_pred['emotion']
 			num = []
-			num.append(predic_labels.count(-1))
 			num.append(predic_labels.count(0))
 			num.append(predic_labels.count(1))
-			# 0:-1, 1:0, 2:1
+			num.append(predic_labels.count(2))
+			# 0:0, 1:1, 2:2
 			if num[0] == num[1] and num[0] != 0 and num[0] > num[2]:
 				pred = 0
 			elif num[1] == num[2] and num[1] != 0 and num[1] > num[0]:

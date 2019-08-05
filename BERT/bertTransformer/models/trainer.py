@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 from sklearn import metrics
 from tensorboardX import SummaryWriter
 
@@ -106,7 +107,7 @@ class Trainer(object):
 		if (model):
 			self.model.train()
 
-	def train(self, train_dataset, device):  # , valid_iter_fct=None, valid_steps=-1)
+	def train(self, train_dataloader, device):  # , valid_iter_fct=None, valid_steps=-1)
 		"""
         The main training loops.
         by iterating over training data (i.e. `train_iter_fct`)
@@ -137,18 +138,22 @@ class Trainer(object):
 			test_dataset = torch.load(self.args.bert_data_path + 'test.data')
 			logger.info('Loading test dataset from %s, number of examples: %d' %
 			            (self.args.bert_data_path, len(test_dataset)))
-
+			test_dataloader = DataLoader(dataset=test_dataset, batch_size=self.args.batch_size, shuffle=False)
+			if self.args.do_use_second_dataset:
+				test_dataset2 = torch.load(self.args.second_dataset_path + 'test.data')
+				test_dataloader2 = DataLoader(dataset=test_dataset2, batch_size=self.args.batch_size, shuffle=False)
 		for epoch in range(self.args.train_epochs):
 			n_correct, n_total = 0., 0.
 			reduce_counter = 0
 			loss_total = 0
 
-			logger.info('Getting minibatches')
-			mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
-			batch_num = len(train_dataset) // self.args.batch_size
+			# logger.info('Getting minibatches')
+			# mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
+			# batch_num = len(train_dataset) // self.args.batch_size
+			batch_num = len(train_dataloader)
 			logger.info('Number of minibatches: %s' % batch_num)
 			logger.info('Start training...')
-			for step, batch in enumerate(mini_batches):
+			for step, batch in enumerate(train_dataloader):  # mini_batches
 				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
 				self.optim.zero_grad()
 					# true_batchs.append(batch)
@@ -158,9 +163,9 @@ class Trainer(object):
 					# 	reduce_counter += 1
 					# 	if self.n_gpu > 1:
 					# 		normalization = sum(distributed.all_gather_list(normalization))
-				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
+				src, labels, segs, clss = batch['src'], batch['labels'], batch['segs'], batch['clss']
 				if torch.cuda.is_available():
-					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					src = torch.cuda.LongTensor([t for t in src]).to(device)  # .reshape(-1, self.args.max_seq_length)
 					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
 					segs = torch.cuda.LongTensor(segs).to(device)  # .reshape(1, -1)
 
@@ -210,11 +215,11 @@ class Trainer(object):
 				report_stats.update(batch_stats)
 
 				logger.info('step-{}, loss:{:.4f}, acc:{:.4f}'.format(step, loss_total / n_total, n_correct / n_total))
-				if step % self.check_steps == 0 or step == batch_num:
+				if  step % self.check_steps == 0 or step == batch_num:
 					valid_acc_2 = 0
-					valid_acc = self.test(self.model, test_dataset, device)
+					valid_acc = self.test(self.model, test_dataloader, device)
 					if self.args.do_use_second_dataset:
-						valid_acc_2 = self.test(self.model, torch.load(self.args.second_dataset_path + 'test.data'), device)
+						valid_acc_2 = self.test(self.model, test_dataloader2, device)
 					if valid_acc > self.best_acc or valid_acc_2 > self.best_acc:
 						self.best_acc = valid_acc
 						self._save(str(self.args.model_name)+str(self.args.lr)+'valid', epoch, self.best_acc)
@@ -298,7 +303,7 @@ class Trainer(object):
 			self._report_step(0, epoch, valid_stats=stats)
 			return stats
 
-	def test(self, model, test_dataset, device, cal_lead=False, cal_oracle=False):
+	def test(self, model, test_dataloader, device, cal_lead=False, cal_oracle=False):
 		""" Validate model.
             valid_iter: validate data iterator
         Returns:
@@ -306,8 +311,10 @@ class Trainer(object):
         """
 		model.eval()
 		stats = Statistics()
-		mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length, shuffle=False)
-		logger.info('Number of minibatches: %s' % (len(test_dataset) // self.args.batch_size))
+		batch_num = len(test_dataloader)
+		logger.info('Number of minibatches: %s' % batch_num)
+		# mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length, shuffle=False)
+		# logger.info('Number of minibatches: %s' % len(test_dataloader))
 		with torch.no_grad():
 			n_correct = 0.
 			n_total = 0.
@@ -315,8 +322,8 @@ class Trainer(object):
 			output_all = None
 			full_pred = []
 			full_label_ids = []
-			for step, batch in enumerate(mini_batches):
-				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
+			for step, batch in enumerate(test_dataloader):
+				src, labels, segs, clss = batch['src'], batch['labels'], batch['segs'], batch['clss']
 				if torch.cuda.is_available():
 					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
 					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
@@ -361,7 +368,7 @@ class Trainer(object):
 												 target_names=['NEG', 'NEU', 'POS'])
 			logger.info('Prediction results: \n{}'.format(pred_res))
 
-			predict_vote(full_pred, full_label_ids, test_dataset)
+			predict_vote(full_pred, full_label_ids, test_dataloader)
 			# self._report_step(0, step, valid_stats=stats)
 		return acc
 
