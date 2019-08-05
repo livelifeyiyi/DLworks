@@ -24,7 +24,7 @@ class BertData():
 	def preprocess(self, src: List[str], label: int):
 		if len(src) == 0:
 			return None
-		src[-1] += '。'
+		src[-1] += ''
 		# original_src_txt = ['。'.join(src)]
 
 		# labels = [0] * len(src)
@@ -45,7 +45,7 @@ class BertData():
 		# src_txt = [' '.join(sent) for sent in src]
 		# text = [' '.join(ex['src_txt'][i].split()[:self.args.max_src_ntokens]) for i in idxs]
 		# text = [_clean(t) for t in text]
-		text = '。 [SEP] [CLS] '.join(src)
+		text = ' [SEP] [CLS] '.join(src)
 		src_subtokens = self.tokenizer.tokenize(text)
 		if len(src_subtokens) > args.max_src_ntokens:
 			src_subtokens = src_subtokens[:(args.max_src_ntokens-2)]
@@ -137,7 +137,7 @@ class Segments:
 		seg_char = '。'
 		all_sentencs = seg_char.join(sentences)
 		if len(all_sentencs) <= max_char:
-			return [entity_name + seg_char + title + seg_char + all_sentencs]
+			return [entity_name, title] + all_sentencs.split(seg_char)
 		entity_start_id = []
 		for i, char in enumerate(all_sentencs):
 			if char == entity_name[0]:
@@ -261,7 +261,7 @@ def process_lie_segment(line_json, datasets, bert):
 			               'src_txt': src_txt}
 			datasets.append(b_data_dict)
 		if args.mode == 'ht_sentence':
-			b_data = bert.preprocess([i for i in segments.split('。') if i], emotion_dict[entity_emotion])
+			b_data = bert.preprocess(segments, emotion_dict[entity_emotion])
 			if b_data is None:
 				print(line_json["corporations"])
 				continue
@@ -381,7 +381,7 @@ if __name__ == '__main__':
 					datasets = []
 
 			print('Saving training data to %s' % args.save_path)
-			torch.save(datasets, args.save_path + 'train_ht.data')
+			torch.save(datasets, args.save_path + 'train.data')
 			total_num = len(datasets)
 			print('Number of document: %s, Number of data :%s' % (count, total_num))
 
