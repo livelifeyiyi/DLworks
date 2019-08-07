@@ -22,6 +22,9 @@ from bertTransformer.models.model_builder import Summarizer
 from bertTransformer.models.trainer import build_trainer
 from bertTransformer.others.logging import logger, init_logger
 
+from bertTransformer.wholeDocProcess import trainer_WDP
+from bertTransformer.wholeDocProcess import reduceDim
+
 model_flags = ['hidden_size', 'ff_size', 'heads', 'inter_layers', 'encoder', 'ff_actv', 'use_interval', 'rnn_size']
 
 
@@ -252,35 +255,75 @@ def train(args, device_id):
 		train_dataset += torch.load(args.second_dataset_path + 'train.data')
 	logger.info('Loading training dataset from %s, number of examples: %d' %
 				(args.bert_data_path, len(train_dataset)))
-	train_dataloader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True)
-	model = Summarizer(args, device, load_pretrained_bert=True)
-	# if args.train_from != '':
-	# 	logger.info('Loading checkpoint from %s' % args.train_from)
-	# 	checkpoint = torch.load(args.train_from,
-	# 							map_location=lambda storage, loc: storage)
-	# 	opt = vars(checkpoint['opt'])
-	# 	for k in opt.keys():
-	# 		if (k in model_flags):
-	# 			setattr(args, k, opt[k])
-	# 	model.load_cp(checkpoint)
-	# 	optim = model_builder.build_optim(args, model, checkpoint)
-	# else:
-	# 	optim = model_builder.build_optim(args, model, None)
-	_params = filter(lambda p: p.requires_grad, model.parameters())
-	optim = optimization.BertAdam(_params, lr=args.lr, weight_decay=args.l2reg)
+	
+	if args.do_WDP:
+		DimReducer = reduceDim.DimReducer(args, device)
+		all_document = []
+		all_labels = []
+		for document in train_dataset:
+			all_document.append(DimReducer(document['src']))
+			all_labels.append(document['labels'])
 
-	logger.info(model)
-	trainer = build_trainer(args, device_id, model, optim)
-	trainer.train(train_dataloader, device)
+		test_document = []
+		test_labels = []
+		test_dataset = torch.load(args.bert_data_path + 'test.data')
+		logger.info('Loading test dataset from %s, number of examples: %d' %
+		            (args.bert_data_path, len(test_dataset)))
+		for document in train_dataset:
+			test_document.append(DimReducer(document['src']))
+			test_labels.append(document['labels'])
 
-	if args.do_test:
-		model = trainer.model
-		model.eval()
-		test_dataset = torch.load(args.bert_data_path + 'valid.data')
-		logger.info('Loading valid dataset from %s, number of examples: %d' %
-					(args.bert_data_path, len(test_dataset)))
-		trainer = build_trainer(args, device_id, model, None)
-		trainer.test(model, test_dataset, device)
+		model = reduceDim.Decoder(args, device, DimReducer.hidden_size, DimReducer.bert_vocab_size)
+
+		_params = filter(lambda p: p.requires_grad, model.parameters())
+		optim = optimization.BertAdam(_params, lr=args.lr, weight_decay=args.l2reg)
+
+		logger.info(model)
+		trainer = trainer_WDP.build_trainer(args, device_id, model, optim)
+		trainer.train([all_document, all_labels], device, [test_document, test_labels])
+
+		if args.do_test:
+			model = trainer.model
+			model.eval()
+			test_dataset = torch.load(args.bert_data_path + 'valid.data')
+			logger.info('Loading valid dataset from %s, number of examples: %d' %
+			            (args.bert_data_path, len(test_dataset)))
+			valid_document = []
+			valid_labels = []
+			for document in train_dataset:
+				valid_document.append(DimReducer(document['src']))
+				valid_labels.append(document['labels'])
+			trainer.test(model, [valid_document, valid_labels], device)
+	else:
+		# train_dataloader = DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True)
+		model = Summarizer(args, device, load_pretrained_bert=True)
+		# if args.train_from != '':
+		# 	logger.info('Loading checkpoint from %s' % args.train_from)
+		# 	checkpoint = torch.load(args.train_from,
+		# 							map_location=lambda storage, loc: storage)
+		# 	opt = vars(checkpoint['opt'])
+		# 	for k in opt.keys():
+		# 		if (k in model_flags):
+		# 			setattr(args, k, opt[k])
+		# 	model.load_cp(checkpoint)
+		# 	optim = model_builder.build_optim(args, model, checkpoint)
+		# else:
+		# 	optim = model_builder.build_optim(args, model, None)
+		_params = filter(lambda p: p.requires_grad, model.parameters())
+		optim = optimization.BertAdam(_params, lr=args.lr, weight_decay=args.l2reg)
+
+		logger.info(model)
+		trainer = build_trainer(args, device_id, model, optim)
+		trainer.train(train_dataset, device)
+
+		if args.do_test:
+			model = trainer.model
+			model.eval()
+			test_dataset = torch.load(args.bert_data_path + 'valid.data')
+			logger.info('Loading valid dataset from %s, number of examples: %d' %
+						(args.bert_data_path, len(test_dataset)))
+			trainer = build_trainer(args, device_id, model, None)
+			trainer.test(model, test_dataset, device)
 
 
 if __name__ == '__main__':
@@ -288,6 +331,7 @@ if __name__ == '__main__':
 
 	parser.add_argument("--encoder", default='transformer', type=str,
 						choices=['classifier', 'transformer', 'rnn', 'baseline'])
+	parser.add_argument("--do_WDP", default=False, action='store_true', help="whether do whole document processing")
 	parser.add_argument("--model_name", default="avg", choices=['avg', 'pool'])
 	parser.add_argument("--mode", default='train', type=str, choices=['train', 'validate', 'test'])
 	parser.add_argument("--do_eval", default=False, action='store_true')
