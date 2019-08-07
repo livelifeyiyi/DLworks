@@ -107,7 +107,7 @@ class Trainer(object):
 		if (model):
 			self.model.train()
 
-	def train(self, train_dataloader, device):  # , valid_iter_fct=None, valid_steps=-1)
+	def train(self, train_dataset, device):  # , valid_iter_fct=None, valid_steps=-1)
 		"""
         The main training loops.
         by iterating over training data (i.e. `train_iter_fct`)
@@ -147,13 +147,11 @@ class Trainer(object):
 			reduce_counter = 0
 			loss_total = 0
 
-			# logger.info('Getting minibatches')
-			# mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
-			# batch_num = len(train_dataset) // self.args.batch_size
-			batch_num = len(train_dataloader)
-			logger.info('Number of minibatches: %s' % batch_num)
+			logger.info('Getting minibatches')
+			mini_batches = get_minibatches(train_dataset, self.args.batch_size, self.args.max_seq_length)
+			logger.info('Number of minibatches: %s' % (len(train_dataset) // self.args.batch_size))
 			logger.info('Start training...')
-			for step, batch in enumerate(train_dataloader):  # mini_batches
+			for step, batch in enumerate(mini_batches):
 				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):
 				self.optim.zero_grad()
 					# true_batchs.append(batch)
@@ -163,12 +161,16 @@ class Trainer(object):
 					# 	reduce_counter += 1
 					# 	if self.n_gpu > 1:
 					# 		normalization = sum(distributed.all_gather_list(normalization))
-				src, labels, segs, clss = batch['src'], batch['labels'], batch['segs'], batch['clss']
+				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
 				if torch.cuda.is_available():
 					src = torch.transpose(torch.cuda.LongTensor([t.numpy() for t in src]),0,1).to(device)  # .reshape(-1, self.args.max_seq_length)
 					labels = torch.cuda.LongTensor(labels.numpy()).to(device)  # .reshape(1, -1)
 					segs = torch.transpose(torch.cuda.LongTensor([t.numpy() for t in segs]),0,1).to(device)  # .reshape(1, -1)
 					clss = np.transpose([t.numpy() for t in clss])
+					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.cuda.LongTensor(segs).to(device)  # .reshape(1, -1)
+
 					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
 					clss = torch.LongTensor(clss).to(device)
 					mask = torch.cuda.ByteTensor((1 - (src == 0))).to(device)
@@ -183,6 +185,27 @@ class Trainer(object):
 					clss = torch.LongTensor(clss).to(device)
 					mask = torch.ByteTensor((1 - (src == 0))).to(device)
 					mask_cls = torch.ByteTensor((1 - (clss == -1))).to(device)  # torch.ByteTensor(mask_cls).to(device)
+					mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
+				'''src, labels, segs, clss = batch['src'], batch['labels'], batch['segs'], batch['clss']
+				if torch.cuda.is_available():
+					src = torch.cuda.LongTensor([t for t in src]).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.cuda.LongTensor(segs).to(device)  # .reshape(1, -1)
+
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.cuda.LongTensor(clss).to(device)
+					mask = torch.cuda.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.cuda.ByteTensor((1 - (clss == -1)))
+				else:
+					src = torch.LongTensor(src).to(device)  		# .reshape(-1, self.args.max_seq_length)
+					labels = torch.LongTensor(labels).to(device)  	# .reshape(1, -1)
+					segs = torch.LongTensor(segs).to(device)		# .reshape(1, -1)
+
+					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
+					clss = torch.LongTensor(clss).to(device)
+					mask = torch.ByteTensor((1 - (src == 0))).to(device)
+					mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)'''
+
 				# src = batch.src
 				# labels = batch.labels
 				# segs = batch.segs
@@ -313,9 +336,9 @@ class Trainer(object):
 		model.eval()
 		stats = Statistics()
 		batch_num = len(test_dataloader)
-		logger.info('Number of minibatches: %s' % batch_num)
-		# mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length, shuffle=False)
-		# logger.info('Number of minibatches: %s' % len(test_dataloader))
+		# logger.info('Number of minibatches: %s' % batch_num)
+		mini_batches = get_minibatches(test_dataset, self.args.batch_size, self.args.max_seq_length, shuffle=False)
+		logger.info('Number of minibatches: %s' % len(test_dataloader))
 		with torch.no_grad():
 			n_correct = 0.
 			n_total = 0.
@@ -323,8 +346,8 @@ class Trainer(object):
 			output_all = None
 			full_pred = []
 			full_label_ids = []
-			for step, batch in enumerate(test_dataloader):
-				src, labels, segs, clss = batch['src'], batch['labels'], batch['segs'], batch['clss']
+			for step, batch in enumerate(mini_batches):
+				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
 				if torch.cuda.is_available():
 					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
 					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
