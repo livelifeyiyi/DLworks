@@ -96,7 +96,7 @@ class Trainer(object):
 
 			logger.info('Getting minibatches')
 			mini_batches = get_minibatches_WDP(train_dataset, self.args.batch_size)
-			logger.info('Number of minibatches: %s' % (len(train_dataset) // self.args.batch_size))
+			logger.info('Number of minibatches: %s' % (len(train_dataset[0]) // self.args.batch_size))
 			logger.info('Start training...')
 			for step, batch in enumerate(mini_batches):
 				# if self.n_gpu == 0 or (step % self.n_gpu == self.gpu_rank):

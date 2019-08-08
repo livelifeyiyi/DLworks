@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-dataset1 = torch.load('../data/train_ht.data')
+dataset1 = torch.load('../data/train_WDP.data')
 # dataset2 = torch.load('../data/train_char.data')
 
 dataloader1 = DataLoader(dataset=dataset1, batch_size=3, shuffle=True)

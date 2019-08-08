@@ -1,6 +1,7 @@
 """
 This file process the long input with various length into 512 dimensional
 """
+import numpy as np
 import torch
 import torch.nn as nn
 from pytorch_pretrained_bert import BertModel, BertConfig
@@ -57,7 +58,7 @@ class Bert(nn.Module):
 
 
 class DimReducer(nn.Module):
-	def __init__(self, args, device, load_pretrained_bert=False, bert_config=None):
+	def __init__(self, args, device, load_pretrained_bert=True, bert_config=None):
 		super(DimReducer, self).__init__()
 		self.args = args
 		self.device = device
@@ -72,38 +73,74 @@ class DimReducer(nn.Module):
 	def avg_pool(self, x, target_dim):
 		"""
 		by using the slide window to get the average vector with target dim
-		:param x:
-		:return:
+		:param x: np.array([float]), (1, seq_len, 768)
+		:return: (1, max_seq_len, 768)
 		"""
 		# x = x.item()
-		res = []
+		res = None
 		for vec in x:  # (seq_len, 768)
-			seq_len = vec.shape[0]
-			vec_idx = [i for i in range(seq_len)]
-			window_size = seq_len + 1 - target_dim
+			seq_len = len(vec)  # .shape[0]
+			# vec_idx = [i for i in range(seq_len)]
+			window_size = seq_len + 1 - target_dim  #  seq_len // target_dim + 1  #
 			idx = 0
-			vec_new = []
+			vec_new = None
 			while idx <= seq_len - window_size:
-				vec_new.append(torch.mean(vec[idx:idx + window_size], dim=0).numpy())
-				idx += 1
-			assert len(vec_new) == target_dim
-			res.append(vec_new)
+				# if idx + window_size >= seq_len:
+				# 	vec_win = vec[idx:]
+				# else:
+				vec_win = vec[idx:idx + window_size]
+				if vec_new is None:
+					vec_new = np.average(vec_win, axis=0).reshape(1, -1)
+				else:
+					vec_new = np.append(vec_new, np.average(vec_win, axis=0).reshape(1, -1), axis=0)
+				idx += 1  # window_size
+			assert len(vec_new) == target_dim  # (max_seq_len, 768)
+			if not res:
+				res = vec_new.reshape(1, target_dim, -1) #
+			else:
+				res = np.append(res, vec_new.reshape(1, target_dim, -1), axis=0)  # .reshape(1, target_dim, -1)
 		return res  # torch.tensor(res).to(self.device)
 
 	def forward(self, x):
 		"""
 		:param x: input token_ids, (1, seq_len)
-		:return: (1, max_seq_len, 768)
+		:return: (max_seq_len, 768)
 		"""
-		top_vec = self.bert(x)  # (1, seq_len, 768)
-		max_seq_len = self.args.max_seq_len
-		return self.avg_pool(top_vec, max_seq_len)
+		max_seq_len = self.args.max_seq_length
+		if len(x) <= max_seq_len:
+			if torch.cuda.is_available():
+				x_in = torch.cuda.LongTensor(x).to(self.device).reshape(1, -1)
+			else:
+				x_in = torch.LongTensor(x).to(self.device).reshape(1, -1)
+			vec_x = self.bert(x_in)
+			return vec_x.detach().numpy()  # .reshape(1, max_seq_len, -1)
+		# idx = [i for i in range(len(x))]
+		all_vec = None
+		j = 0
+		while j < len(x):
+			if j + max_seq_len >= len(x):
+				x_seg = x[j:]
+			else:
+				x_seg = x[j: j+max_seq_len]
+			if torch.cuda.is_available():
+				x_in = torch.cuda.LongTensor(x_seg).to(self.device).reshape(1, -1)
+			else:
+				x_in = torch.LongTensor(x_seg).to(self.device).reshape(1, -1)
+			vec_seg = self.bert(x_in)  # (1, seq_len, 768)
+			if all_vec is not None:
+				all_vec = np.append(all_vec, vec_seg.detach().numpy(), axis=1)
+			else:
+				all_vec = vec_seg.detach().numpy()
+			j += max_seq_len
+
+		return self.avg_pool(all_vec, max_seq_len)
 
 
 class Decoder(nn.Module):
 	def __init__(self, args, device, hidden_size, bert_vocab_size):
 		super(Decoder, self).__init__()
 		self.device = device
+		self.args = args
 		if args.encoder == 'classifier':
 			self.encoder = Classifier(hidden_size)
 		elif args.encoder == 'transformer':
@@ -127,11 +164,15 @@ class Decoder(nn.Module):
 				if p.dim() > 1:
 					xavier_uniform_(p)
 
-	def forward(self, x):
+	def forward(self, top_vec):
 		# (batch_size, max_seq_len, 768)
 		if torch.cuda.is_available():
-			mask = torch.cuda.ByteTensor((1 - (x == 0))).to(self.device)
+			mask = torch.cuda.ByteTensor((1 - (top_vec == 0))).to(self.device)
 		else:
-			mask = torch.ByteTensor((1 - (x == 0))).to(self.device)
+			mask = torch.ByteTensor((1 - (top_vec == 0))).to(self.device)
 
-		self.encoder(self.args.model_name, x, mask)
+		x = top_vec[torch.arange(top_vec.size(0)).unsqueeze(1)]  # top_vec[, clss]  # get vectors of [cls] tags
+		# sents_vec = sents_vec * mask_cls[:, :, None].float()  # (batch_size, sentences_num, 768)
+
+		logits = self.encoder(self.args.model_name, x, mask)
+		return logits

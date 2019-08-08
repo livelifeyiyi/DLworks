@@ -163,29 +163,24 @@ class Trainer(object):
 					# 		normalization = sum(distributed.all_gather_list(normalization))
 				src, labels, segs, clss = batch[0], batch[1], batch[2], batch[3]
 				if torch.cuda.is_available():
-					src = torch.transpose(torch.cuda.LongTensor([t.numpy() for t in src]),0,1).to(device)  # .reshape(-1, self.args.max_seq_length)
-					labels = torch.cuda.LongTensor(labels.numpy()).to(device)  # .reshape(1, -1)
-					segs = torch.transpose(torch.cuda.LongTensor([t.numpy() for t in segs]),0,1).to(device)  # .reshape(1, -1)
-					clss = np.transpose([t.numpy() for t in clss])
 					src = torch.cuda.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
 					labels = torch.cuda.LongTensor(labels).to(device)  # .reshape(1, -1)
 					segs = torch.cuda.LongTensor(segs).to(device)  # .reshape(1, -1)
 
 					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
-					clss = torch.LongTensor(clss).to(device)
+					clss = torch.cuda.LongTensor(clss).to(device)
 					mask = torch.cuda.ByteTensor((1 - (src == 0))).to(device)
-					mask_cls = torch.cuda.ByteTensor((1 - (clss == -1))).to(device)
+					mask_cls = torch.cuda.ByteTensor((1 - (clss == -1)))
 				else:
-					src = torch.transpose(torch.LongTensor([t.numpy() for t in src]),0,1).to(device)		# .reshape(-1, self.args.max_seq_length)
-					labels = torch.LongTensor(labels.numpy()).to(device) 	# .reshape(1, -1)
-					segs = torch.transpose(torch.LongTensor([t.numpy() for t in segs]),0,1).to(device)		# .reshape(1, -1)
+					src = torch.LongTensor(src).to(device)  # .reshape(-1, self.args.max_seq_length)
+					labels = torch.LongTensor(labels).to(device)  # .reshape(1, -1)
+					segs = torch.LongTensor(segs).to(device)  # .reshape(1, -1)
 
-					clss = np.transpose([t.numpy() for t in clss])
 					clss = [(cls + [-1] * (max([len(i) for i in clss]) - len(cls))) for cls in clss]
 					clss = torch.LongTensor(clss).to(device)
 					mask = torch.ByteTensor((1 - (src == 0))).to(device)
-					mask_cls = torch.ByteTensor((1 - (clss == -1))).to(device)  # torch.ByteTensor(mask_cls).to(device)
 					mask_cls = torch.ByteTensor((1 - (clss == -1)))  # torch.ByteTensor(mask_cls).to(device)
+
 				'''src, labels, segs, clss = batch['src'], batch['labels'], batch['segs'], batch['clss']
 				if torch.cuda.is_available():
 					src = torch.cuda.LongTensor([t for t in src]).to(device)  # .reshape(-1, self.args.max_seq_length)

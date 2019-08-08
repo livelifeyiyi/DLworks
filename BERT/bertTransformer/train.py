@@ -22,7 +22,7 @@ from bertTransformer.models.model_builder import Summarizer
 from bertTransformer.models.trainer import build_trainer
 from bertTransformer.others.logging import logger, init_logger
 
-from bertTransformer.wholeDocProcess import trainer_WDP
+from bertTransformer.wholeDocProcess import trainerWDP
 from bertTransformer.wholeDocProcess import reduceDim
 
 model_flags = ['hidden_size', 'ff_size', 'heads', 'inter_layers', 'encoder', 'ff_actv', 'use_interval', 'rnn_size']
@@ -250,7 +250,7 @@ def train(args, device_id):
 	# 	return data_loader.Dataloader(args, load_dataset(args, 'train', shuffle=True), args.batch_size, device,
 	# 								  shuffle=True, is_test=False)
 
-	train_dataset = torch.load(args.bert_data_path + 'train_ht.data')
+	train_dataset = torch.load(args.bert_data_path + 'train_WDP.data')
 	if args.do_use_second_dataset:
 		train_dataset += torch.load(args.second_dataset_path + 'train.data')
 	logger.info('Loading training dataset from %s, number of examples: %d' %
@@ -261,17 +261,17 @@ def train(args, device_id):
 		all_document = []
 		all_labels = []
 		for document in train_dataset:
-			all_document.append(DimReducer(document['src']))
+			all_document.append(DimReducer(document['src']).reshape(args.max_seq_length, -1))
 			all_labels.append(document['labels'])
 
 		test_document = []
 		test_labels = []
-		test_dataset = torch.load(args.bert_data_path + 'test.data')
-		logger.info('Loading test dataset from %s, number of examples: %d' %
-		            (args.bert_data_path, len(test_dataset)))
-		for document in train_dataset:
-			test_document.append(DimReducer(document['src']))
-			test_labels.append(document['labels'])
+		# test_dataset = torch.load(args.bert_data_path + 'test.data')
+		# logger.info('Loading test dataset from %s, number of examples: %d' %
+		#             (args.bert_data_path, len(test_dataset)))
+		# for document in train_dataset:
+		# 	test_document.append(DimReducer(document['src']))
+		# 	test_labels.append(document['labels'])
 
 		model = reduceDim.Decoder(args, device, DimReducer.hidden_size, DimReducer.bert_vocab_size)
 
@@ -279,7 +279,7 @@ def train(args, device_id):
 		optim = optimization.BertAdam(_params, lr=args.lr, weight_decay=args.l2reg)
 
 		logger.info(model)
-		trainer = trainer_WDP.build_trainer(args, device_id, model, optim)
+		trainer = trainerWDP.build_trainer(args, device_id, model, optim)
 		trainer.train([all_document, all_labels], device, [test_document, test_labels])
 
 		if args.do_test:
@@ -331,7 +331,7 @@ if __name__ == '__main__':
 
 	parser.add_argument("--encoder", default='transformer', type=str,
 						choices=['classifier', 'transformer', 'rnn', 'baseline'])
-	parser.add_argument("--do_WDP", default=False, action='store_true', help="whether do whole document processing")
+	parser.add_argument("--do_WDP", default=True, action='store_true', help="whether do whole document processing")
 	parser.add_argument("--model_name", default="avg", choices=['avg', 'pool'])
 	parser.add_argument("--mode", default='train', type=str, choices=['train', 'validate', 'test'])
 	parser.add_argument("--do_eval", default=False, action='store_true')
