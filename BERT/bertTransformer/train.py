@@ -259,28 +259,47 @@ def train(args, device_id):
 				(args.bert_data_path, len(train_dataset)))
 	
 	if args.do_WDP:
-		DimReducer = reduceDim.DimReducer(args, device)
-		all_document = None
-		all_labels = None
-		for document in tqdm(train_dataset, desc="Loading dataset", unit="lines"):
-			if not all_document:
-				all_document = DimReducer(document['src']).reshape(args.max_seq_length, -1)
-				all_labels = np.array([document['labels']])
-			else:
-				all_document = np.append(all_document, DimReducer(document['src']).reshape(args.max_seq_length, -1))
-				all_labels = np.append(all_labels, document['labels'])
-			# all_document.append(DimReducer(document['src']).reshape(args.max_seq_length, -1))
-			
-		np.save(args.bert_data_path + 'train_512dim.np', all_document)
-		test_document = []
-		test_labels = []
-		# test_dataset = torch.load(args.bert_data_path + 'test.data')
-		# logger.info('Loading test dataset from %s, number of examples: %d' %
-		#             (args.bert_data_path, len(test_dataset)))
-		# for document in train_dataset:
-		# 	test_document.append(DimReducer(document['src']))
-		# 	test_labels.append(document['labels'])
-		# logger.info("Reduce dimension finished, document dimension:(%s, %s)"%(len(all_document), len(all_document[0])))
+		if os.path.exists(args.bert_data_path + 'train_512dim.data.npy') and os.path.exists('train_512dim.labels.npy'):
+			all_document = np.load(args.bert_data_path + 'train_512dim.data')
+			all_labels = np.load(args.bert_data_path + 'train_512dim.labels')
+		else:
+			DimReducer = reduceDim.DimReducer(args, device)
+			all_document = None
+			all_labels = None
+			for document in tqdm(train_dataset, desc="Loading dataset", unit="lines"):
+				if all_document is None:
+					all_document = DimReducer(document['src'])  #.reshape(args.max_seq_length, -1)
+					all_labels = np.array([document['labels']])
+				else:
+					all_document = np.append(all_document, DimReducer(document['src']), axis=0)
+					all_labels = np.append(all_labels, document['labels'])
+				# all_document.append(DimReducer(document['src']).reshape(args.max_seq_length, -1))
+			assert all_labels.shape[0] == all_document.shape[0]
+			np.save(args.bert_data_path + 'train_512dim.data', all_document)
+			np.save(args.bert_data_path + 'train_512dim.labels', all_labels)
+
+		test_dataset = torch.load(args.bert_data_path + 'valid.data')
+		logger.info('Loading valid dataset from %s, number of examples: %d' %
+		            (args.bert_data_path, len(test_dataset)))
+		if os.path.exists(args.bert_data_path + 'valid_512dim.data.npy') and os.path.exists('valid_512dim.labels.npy'):
+			test_document = np.load(args.bert_data_path + 'valid_512dim.data')
+			test_labels = np.load(args.bert_data_path + 'valid_512dim.labels')
+		else:
+			DimReducer = reduceDim.DimReducer(args, device)
+			test_document = None
+			test_labels = None
+			for document in tqdm(test_dataset, desc="Loading dataset", unit="lines"):
+				if test_document is None:
+					test_document = DimReducer(document['src'])  #.reshape(args.max_seq_length, -1)
+					test_labels = np.array([document['labels']])
+				else:
+					test_document = np.append(test_document, DimReducer(document['src']), axis=0)
+					test_labels = np.append(test_labels, document['labels'])
+				# test_document.append(DimReducer(document['src']).reshape(args.max_seq_length, -1))
+			assert test_labels.shape[0] == test_document.shape[0]
+			np.save(args.bert_data_path + 'valid_512dim.data', test_document)
+			np.save(args.bert_data_path + 'valid_512dim.labels', test_labels)
+
 		model = reduceDim.Decoder(args, device, DimReducer.hidden_size, DimReducer.bert_vocab_size)
 
 		_params = filter(lambda p: p.requires_grad, model.parameters())
