@@ -109,11 +109,13 @@ class DimReducer(nn.Module):
 		max_seq_len = self.args.max_seq_length
 		if len(x) <= max_seq_len:
 			if torch.cuda.is_available():
+				x += torch.cuda.LongTensor([0] * (max_seq_len - len(x)))
 				x_in = torch.cuda.LongTensor(x).to(self.device).reshape(1, -1)
 			else:
+				x += torch.LongTensor([0] * (max_seq_len - len(x)))
 				x_in = torch.LongTensor(x).to(self.device).reshape(1, -1)
 			vec_x = self.bert(x_in)
-			return vec_x.detach().numpy()  # .reshape(1, max_seq_len, -1)
+			return vec_x.cpu().detach().numpy()  # .reshape(1, max_seq_len, -1)
 		# idx = [i for i in range(len(x))]
 		all_vec = None
 		j = 0
@@ -126,7 +128,7 @@ class DimReducer(nn.Module):
 				x_in = torch.cuda.LongTensor(x_seg).to(self.device).reshape(1, -1)
 			else:
 				x_in = torch.LongTensor(x_seg).to(self.device).reshape(1, -1)
-			vec_seg = self.bert(x_in)  # (1, seq_len, 768)
+			vec_seg = self.bert(x_in).cpu()  # (1, seq_len, 768)
 			if all_vec is not None:
 				all_vec = np.append(all_vec, vec_seg.detach().numpy(), axis=1)
 			else:
