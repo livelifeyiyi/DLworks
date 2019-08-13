@@ -11,9 +11,11 @@ import random
 import signal
 import time
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from pytorch_pretrained_bert import BertConfig, optimization
+from tqdm import tqdm
 
 import bertTransformer.distributed as distributed
 # from bertTransformer.models import data_loader, model_builder
@@ -250,7 +252,7 @@ def train(args, device_id):
 	# 	return data_loader.Dataloader(args, load_dataset(args, 'train', shuffle=True), args.batch_size, device,
 	# 								  shuffle=True, is_test=False)
 
-	train_dataset = torch.load(args.bert_data_path + 'train_WDP.data')
+	train_dataset = torch.load(args.bert_data_path + 'train.data')
 	if args.do_use_second_dataset:
 		train_dataset += torch.load(args.second_dataset_path + 'train.data')
 	logger.info('Loading training dataset from %s, number of examples: %d' %
@@ -258,12 +260,18 @@ def train(args, device_id):
 	
 	if args.do_WDP:
 		DimReducer = reduceDim.DimReducer(args, device)
-		all_document = []
-		all_labels = []
-		for document in train_dataset:
-			all_document.append(DimReducer(document['src']).reshape(args.max_seq_length, -1))
-			all_labels.append(document['labels'])
-
+		all_document = None
+		all_labels = None
+		for document in tqdm(train_dataset, desc="Loading dataset", unit="lines"):
+			if not all_document:
+				all_document = DimReducer(document['src']).reshape(args.max_seq_length, -1)
+				all_labels = np.array([document['labels']])
+			else:
+				all_document = np.append(all_document, DimReducer(document['src']).reshape(args.max_seq_length, -1))
+				all_labels = np.append(all_labels, document['labels'])
+			# all_document.append(DimReducer(document['src']).reshape(args.max_seq_length, -1))
+			
+		np.save(args.bert_data_path + 'train_512dim.np', all_document)
 		test_document = []
 		test_labels = []
 		# test_dataset = torch.load(args.bert_data_path + 'test.data')
@@ -272,7 +280,7 @@ def train(args, device_id):
 		# for document in train_dataset:
 		# 	test_document.append(DimReducer(document['src']))
 		# 	test_labels.append(document['labels'])
-
+		# logger.info("Reduce dimension finished, document dimension:(%s, %s)"%(len(all_document), len(all_document[0])))
 		model = reduceDim.Decoder(args, device, DimReducer.hidden_size, DimReducer.bert_vocab_size)
 
 		_params = filter(lambda p: p.requires_grad, model.parameters())
