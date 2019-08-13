@@ -461,9 +461,15 @@ if __name__ == '__main__':
 
 	if args.test_data:
 		df = pd.read_excel(args.input_file)
+		df = df.sample(frac=1).reset_index(drop=True)
 		for i in range(df.shape[0]):
 			datasets = process_lie_segment_test(df.loc[i], datasets, bert)
-		print('Saving test data to %s' % args.save_path)
-		torch.save(datasets, args.save_path + 'test.data')
+			if count == int(len(data) * args.valid_percent):
+				print(i)
+				print('Saving validation set to %s, number of data: %s' % (args.save_path, len(datasets)))
+				torch.save(datasets, args.save_path + 'valid.data')
+				datasets = []
+		print('Saving training data to %s' % args.save_path)
+		torch.save(datasets, args.save_path + 'train.data') # test
 		total_num = len(datasets)
 		print('Number of document: %s, Number of data :%s' % (df.shape[0], total_num))
