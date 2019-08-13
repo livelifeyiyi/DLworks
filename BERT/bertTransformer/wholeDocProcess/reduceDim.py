@@ -108,11 +108,11 @@ class DimReducer(nn.Module):
 		"""
 		max_seq_len = self.args.max_seq_length
 		if len(x) <= max_seq_len:
+			if len(x) < max_seq_len:
+				x = torch.cat(x, torch.cuda.LongTensor([0] * (max_seq_len - len(x))))
 			if torch.cuda.is_available():
-				x += torch.cuda.LongTensor([0] * (max_seq_len - len(x)))
 				x_in = torch.cuda.LongTensor(x).to(self.device).reshape(1, -1)
 			else:
-				x += torch.LongTensor([0] * (max_seq_len - len(x)))
 				x_in = torch.LongTensor(x).to(self.device).reshape(1, -1)
 			vec_x = self.bert(x_in)
 			return vec_x.cpu().detach().numpy()  # .reshape(1, max_seq_len, -1)
@@ -150,8 +150,8 @@ class Decoder(nn.Module):
 												   args.dropout, args.inter_layers, args.polarities_dim)
 		elif args.encoder == 'rnn':
 			self.encoder = RNNEncoder(bidirectional=True, num_layers=1,
-									  input_size=hidden_size, hidden_size=args.rnn_size,
-									  dropout=args.dropout)
+									  input_size=hidden_size, hidden_size=args.rnn_size, tag_size=args.polarities_dim,
+									  dropout=args.dropout, batch_size=args.batch_size)
 		elif args.encoder == 'baseline':
 			bert_config = BertConfig(bert_vocab_size, hidden_size=args.hidden_size,
 									 num_hidden_layers=6, num_attention_heads=8, intermediate_size=args.ff_size)

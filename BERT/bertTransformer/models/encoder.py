@@ -93,6 +93,8 @@ class TransformerInterEncoder(nn.Module):
 
 		batch_size, n_sents = top_vecs.size(0), top_vecs.size(1)
 		pos_emb = self.pos_emb.pe[:, :n_sents]
+		# if torch.cuda.is_available():
+		# 	pos_emb = torch.cuda.FloatTensor(pos_emb).to(device)
 		x = top_vecs * mask[:, :, None].float()
 		x = x + pos_emb
 		# x_ = x
@@ -126,7 +128,7 @@ class Classifier(nn.Module):
 
 class RNNEncoder(nn.Module):
 	def __init__(self, bidirectional, num_layers, input_size,
-				 hidden_size, dropout=0.0):
+				 hidden_size, tag_size, dropout=0.0, batch_size=1):
 		super(RNNEncoder, self).__init__()
 		num_directions = 2 if bidirectional else 1
 		assert hidden_size % num_directions == 0
@@ -141,14 +143,37 @@ class RNNEncoder(nn.Module):
 		self.wo = nn.Linear(num_directions * hidden_size, 1, bias=True)
 		self.dropout = nn.Dropout(dropout)
 		self.sigmoid = nn.Sigmoid()
+		self.att_weight = nn.Parameter(torch.randn(batch_size, 1, hidden_size))
+		self.batch = batch_size
+		self.hidden_dim = hidden_size
+		self.tag_size = tag_size
+		self.relation_embeds = nn.Embedding(self.tag_size, self.hidden_dim)
 
-	def forward(self, x, mask):
+	def attention(self, H):  # input: (batch/1, hidden, seq); output: (batch/1, hidden, 1)
+		M = torch.tanh(H)
+		a = torch.nn.functional.softmax(torch.bmm(self.att_weight, M), 2)
+		a = torch.transpose(a, 1, 2)
+		return torch.bmm(H, a)
+
+	def forward(self, out_name, x, mask):
 		"""See :func:`EncoderBase.forward()`"""
 		x = torch.transpose(x, 1, 0)
 		memory_bank, _ = self.rnn(x)
-		memory_bank = self.dropout(memory_bank) + x
-		memory_bank = torch.transpose(memory_bank, 1, 0)
 
-		sent_scores = self.sigmoid(self.wo(memory_bank))
-		sent_scores = sent_scores.squeeze(-1) * mask.float()
-		return sent_scores
+		att_out = torch.tanh(self.attention(memory_bank.contiguous().view(self.batch, self.hidden_dim, -1)))
+		# att_out = self.dropout_att(att_out)
+		relation = torch.tensor([i for i in range(self.tag_size)], dtype=torch.long).repeat(self.batch, 1)
+		if torch.cuda.is_available():
+			relation = relation.cuda()
+		relation = self.relation_embeds(relation)
+		res = torch.add(torch.bmm(relation, att_out), self.relation_bias)
+		res = torch.nn.functional.softmax(res, 1)
+
+		return res.view(self.batch, -1)
+
+		# memory_bank = self.dropout(memory_bank) + x
+		# memory_bank = torch.transpose(memory_bank, 1, 0)
+		#
+		# sent_scores = self.sigmoid(self.wo(memory_bank))
+		# sent_scores = sent_scores.squeeze(-1) * mask.float()
+		# return sent_scores
