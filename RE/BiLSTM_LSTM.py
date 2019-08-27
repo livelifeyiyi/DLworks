@@ -12,15 +12,29 @@ from torch import optim
 import torch.nn.functional as F
 import torch.utils.data as D
 from torch.autograd import Variable
+from pytorch_transformers import BertModel
 from general_utils import get_minibatches, padding_sequence
 from torch.nn.utils.rnn import pad_sequence
 import os
+from RE import Jointly_RL
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # SOS_token = 0
 # EOS_token = 1
+
+
+class JointModel(nn.Module):
+	def __init__(self, config, embedding_pre, dim, relation_count):
+		super(JointModel, self).__init__()
+		self.encoder_model = config.encoder_model
+		if self.encoder_model == "BiLSTM":
+			self.encoder = EncoderRNN(config, embedding_pre)
+		elif self.encoder_model == "BERT":
+			self.encoder = EncoderBert(config)
+		self.decoder = DecoderRNN(config)
+		self.relation_model = RelationDecoder(config, dim, relation_count)  # Jointly_RL.RelationModel(config, dim, statedim, relation_count, noisy_count)
 
 
 class EncoderRNN(nn.Module):
@@ -37,7 +51,6 @@ class EncoderRNN(nn.Module):
 				self.embedding = nn.Embedding.from_pretrained(torch.cuda.FloatTensor(embedding_pre, device=device), freeze=False)
 			else:
 				self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
-
 		else:
 			self.embedding_size = config.embedding_size + 1
 			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
@@ -59,30 +72,46 @@ class EncoderRNN(nn.Module):
 				torch.randn(4, self.batch, self.hidden_dim // 2, device=device))  # if use_cuda, .cuda
 
 
+class EncoderBert(nn.Module):
+	def __init__(self, config, load_pretrained_bert=True):
+		super(EncoderBert, self).__init__()
+		if load_pretrained_bert:
+			self.model = BertModel.from_pretrained(config.pretrained_dir)
+		else:
+			self.model = BertModel(config.pretrained_dir+'bert_config.json')
+		self.encoder_model = config.encoder_model
+
+	def forward(self, x, mask):  # , segs
+		encoded_layers, pooled_output = self.model(x, attention_mask=mask)  # , segs
+		top_vec = encoded_layers[-1]
+		return top_vec
+
+
 class DecoderRNN(nn.Module):
-	def __init__(self, config, embedding_pre):
+	def __init__(self, config):
 		super(DecoderRNN, self).__init__()
 		self.batch = config.batchsize
 		self.embedding_dim = config.embedding_dim
 		self.hidden_dim = config.hidden_dim
 		# self.tag_size = config['TAG_SIZE']
-		self.pretrained = config.pretrain_vec
+		# self.pretrained = config.pretrain_vec
 		self.dropout = config.dropout
 		self.tag_size = config.entity_tag_size + 1
-		if self.pretrained:
-			if torch.cuda.is_available():
-				self.embedding = nn.Embedding.from_pretrained(torch.cuda.FloatTensor(embedding_pre, device=device), freeze=False)
-			else:
-				self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
-		else:
-			self.embedding_size = config.embedding_size + 1
-			self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
-		self.lstm = nn.LSTM(input_size=self.embedding_dim*2, hidden_size=self.hidden_dim, batch_first=True, num_layers=2, dropout=self.dropout)  # hidden_size, hidden_size)
+		# if self.pretrained:
+		# 	if torch.cuda.is_available():
+		# 		self.embedding = nn.Embedding.from_pretrained(torch.cuda.FloatTensor(embedding_pre, device=device), freeze=False)
+		# 	else:
+		# 		self.embedding = nn.Embedding.from_pretrained(torch.FloatTensor(embedding_pre, device=device), freeze=False)
+		# else:
+		# 	self.embedding_size = config.embedding_size + 1
+		# 	self.embedding = nn.Embedding(self.embedding_size, self.embedding_dim)
+		# input_size=self.embedding_dim*2
+		self.lstm = nn.LSTM(input_size=self.hidden_dim, hidden_size=self.hidden_dim, batch_first=True, num_layers=2, dropout=self.dropout)  # hidden_size, hidden_size)
 		self.entity_embeds = nn.Embedding(self.tag_size, self.hidden_dim)
 		self.hidden2tag = nn.Linear(self.hidden_dim, self.tag_size)  # out
 		self.softmax = nn.LogSoftmax(dim=1)
 
-	def forward(self, input, hidden):
+	def forward(self, input, hidden=None):
 		# output = self.embedding(input).view(-1, self.batch, self.embedding_dim)   # ??? need embedding??
 		output = F.relu(input)
 		output, hidden = self.lstm(output, hidden)
@@ -92,6 +121,61 @@ class DecoderRNN(nn.Module):
 	def initHidden(self):
 		# (layers*direction, batch, hidden)
 		return torch.zeros(2, self.batch, self.hidden_dim, device=device)
+
+
+class RelationDecoder(nn.Module):
+	def __init__(self, args, dim, relation_count):
+		super(RelationDecoder, self).__init__()
+		self.dropout = args.dropout
+		self.batch = args.batchsize
+		self.dim = dim
+		self.tag_size = relation_count + 1
+		# self.hid2state = nn.Linear(dim * 2 + dim, dim)  # statedim
+		# self.state2prob_relation = nn.Linear(dim, self.tag_size)  # + 1
+		self.att_weight = nn.Parameter(torch.randn(self.batch, 1, self.dim))  # (self.batch, 1, self.hidden_dim)
+		self.lstm = nn.LSTM(input_size=dim * 2, hidden_size=dim, num_layers=2,batch_first=True,
+							dropout=self.dropout)  # dim * 2 + dim batch_first=True,hidden_size, hidden_size)
+		self.relation_bias = nn.Parameter(torch.randn(self.batch, self.tag_size, 1))  # self.batch, self.tag_size, 1
+		self.dropout_lstm = nn.Dropout(p=self.dropout)
+		# self.dropout_att = nn.Dropout(p=self.dropout)
+		self.relation_embeds = nn.Embedding(self.tag_size, self.dim)
+
+	def attention(self, H):  # input: (batch/1, hidden, seq); output: (batch/1, hidden, 1)
+		M = torch.tanh(H)
+		a = F.softmax(torch.bmm(self.att_weight, M), 2)
+		a = torch.transpose(a, 1, 2)
+		return torch.bmm(H, a)
+
+	def forward(self, hidden, encoder_output, decoder_output):
+		if torch.cuda.is_available():
+			encoder_output = encoder_output.cuda()  # Variable(torch.cuda.LongTensor(encoder_output, device=device)).cuda()
+			decoder_output = decoder_output.cuda()  # Variable(torch.cuda.LongTensor(decoder_output, device=device)).cuda()
+			# memory = memory.cuda()  # Variable(torch.cuda.LongTensor(memory, device=device)).cuda()
+
+		seq_vec = torch.cat((encoder_output.view(self.batch, -1, self.dim), decoder_output.view(self.batch, -1, self.dim)), 2)
+		lstm_out, hidden = self.lstm(seq_vec, hidden)
+		lstm_out = self.dropout_lstm(lstm_out)
+
+		sentence_vec = torch.tanh(self.attention(torch.transpose(lstm_out, 1, 2)))  # (1, dim*2, 1)
+		# self.state2prob_relation(sentence_vec.squeeze())
+
+		'''inp = sentence_vec  # torch.cat((sentence_vec.view(-1), memory), 0)  # (2100-300)
+		outp = F.dropout(torch.tanh(self.hid2state(inp)), training=training)
+		prob_relation = self.softmax(self.state2prob_relation(outp))'''
+
+		# output = F.relu(inp)
+
+		# att_out = torch.tanh(self.attention(lstm_out.view(self.batch, self.hidden_dim, -1)))
+		# att_out = self.dropout_att(att_out)
+		relation = torch.tensor([i for i in range(self.tag_size)], dtype=torch.long).repeat(self.batch, 1)  # (batch, 1)
+		if torch.cuda.is_available():
+			relation = relation.cuda()
+		relation = self.relation_embeds(relation)
+		res = torch.add(torch.bmm(relation, sentence_vec), self.relation_bias)
+		res = F.softmax(res, 1)
+		# prob_relation = F.softmax(self.state2prob_relation(outp.view(-1)), dim=0)  # self.softmax(self.state2prob_relation(outp.view(-1)))
+
+		return lstm_out, res.squeeze()  # .view(-1)
 
 
 # class AttnDecoderRNN(nn.Module):
@@ -112,50 +196,74 @@ def timeSince(since, percent):
 teacher_forcing_ratio = 0.5
 
 
-def train(input_tensor, pos_tensor, target_tensor, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, BATCH, TEST=False):  # max_length=MAX_LENGTH
-	encoder_hidden = encoder.initHidden_bilstm()
+def train(input_tensor, pos_tensor, target_tensor, relation_target_tensor, JointModel, optimizer, criterion, BATCH, TEST=False, mask=None):  # max_length=MAX_LENGTH
 
-	encoder_optimizer.zero_grad()
-	decoder_optimizer.zero_grad()
+	optimizer.zero_grad()
+	encoder = JointModel.encoder
+	decoder = JointModel.decoder
+	relation_decoder = JointModel.relation_model
 
-	target_length = target_tensor.size(0)
-	seq_length = target_tensor.size(1)
 	# target_length = target_tensor.size(0)
-	loss = 0
-
+	# seq_length = target_tensor.size(1)
+	# target_length = target_tensor.size(0)
 	# one word by one ?????
 	# encoder_outputs = torch.zeros(input_length, encoder_hidden, device=device)  # max_length
 	# for ei in range(input_length):
 	# 	encoder_output, encoder_hidden = encoder(input_tensor[ei], encoder_hidden)
 	# 	encoder_outputs[ei] = encoder_output[0, 0]
 
-	# input batch
-	encoder_outputs, encoder_hidden = encoder(input_tensor, pos_tensor, encoder_hidden)
-	# input_tensor: (batch, seq); encoder_hidden: (layer*direction, batch, hidden_dim//2)
-	# encoder_outputs: (batch, seq, hidden_dim//2*2); encoder_hidden: (layer*direction, batch, hidden_dim//2)
+	if JointModel.encoder_model == "BiLSTM":
+		encoder_hidden = encoder.initHidden_bilstm()
+		# input batch
+		encoder_outputs, encoder_hidden = encoder(input_tensor, pos_tensor, encoder_hidden)
+		# input_tensor: (batch, seq); encoder_hidden: (layer*direction, batch, hidden_dim//2)
+		# encoder_outputs: (batch, seq, hidden_dim//2*2); encoder_hidden: (layer*direction, batch, hidden_dim//2)
 
-	# decoder_input = torch.tensor([[SOS_token] for i in range(BATCH)], device=device).view(BATCH, 1, 1)
-	# for one-layer
-	# decoder_hidden = (torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1),
-	# 				  torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1))# encoder_hidden
-	# for 2 layer
-	h1 = torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1)  # concat forward and backward hidden at layer1
-	h2 = torch.cat((encoder_hidden[0][2], encoder_hidden[0][3]), 1).view(1, BATCH, -1)  # layer2
-	c1 = torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1)
-	c2 = torch.cat((encoder_hidden[1][2], encoder_hidden[1][3]), 1).view(1, BATCH, -1)
-	decoder_hidden = (torch.cat((h1, h2), 0),
-					  torch.cat((c1, c2), 0))  # (layer*direction, batch, hidden_dim)
+		# decoder_input = torch.tensor([[SOS_token] for i in range(BATCH)], device=device).view(BATCH, 1, 1)
+		# for one-layer
+		# decoder_hidden = (torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1),
+		# 				  torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1))# encoder_hidden
+		# for 2 layer
+		h1 = torch.cat((encoder_hidden[0][0], encoder_hidden[0][1]), 1).view(1, BATCH, -1)  # concat forward and backward hidden at layer1
+		h2 = torch.cat((encoder_hidden[0][2], encoder_hidden[0][3]), 1).view(1, BATCH, -1)  # layer2
+		c1 = torch.cat((encoder_hidden[1][0], encoder_hidden[1][1]), 1).view(1, BATCH, -1)
+		c2 = torch.cat((encoder_hidden[1][2], encoder_hidden[1][3]), 1).view(1, BATCH, -1)
+		decoder_hidden = (torch.cat((h1, h2), 0),
+						  torch.cat((c1, c2), 0))  # (layer*direction, batch, hidden_dim)
 
-	decoder_input = encoder_outputs
+		decoder_input = encoder_outputs
+		decoder_output, decoder_output_tag, decoder_hidden = decoder(decoder_input, decoder_hidden)  # entity
+		RE_output, RE_output_tag = relation_decoder(decoder_hidden, encoder_outputs, decoder_output)  # relation
+	else:
+		top_vec = encoder(input_tensor, mask)
+		decoder_output, decoder_output_tag, decoder_hidden = decoder(top_vec)
+		RE_output, RE_output_tag = relation_decoder(decoder_hidden, top_vec, decoder_output)
 
-	decoder_output, decoder_output_tag, decoder_hidden = decoder(decoder_input, decoder_hidden)
 	# (batch, seq, hidden_dim)  (layer*direction, batch, hidden_dim)
 	# decoder_output_T = decoder_output_tag.transpose(0, 1)  # (batch, seq, hidden_dim) -- >(seq, batch, hidden_dim)
 	# target_tensor_T = target_tensor.transpose(0, 1)  # (batch, seq) --> (seq, batch)
 	# for i in range(target_length):
+		# Only keep active parts of the loss
+	if mask is not None:
+		active_loss = mask.view(-1) == 1
+		NER_active_logits = decoder_output_tag.view(-1, decoder.tag_size)[active_loss]
+		NER_active_labels = target_tensor.view(-1)[active_loss]
+	else:
+		NER_active_logits = decoder_output_tag.view(-1, decoder.tag_size)
+		NER_active_labels = target_tensor.view(-1)
+
 	if not TEST:
-		for j in range(target_length):  # each sentence  # seq_length
-			loss += criterion(decoder_output_tag[j], target_tensor[j])
+		loss_entity = criterion(NER_active_logits, NER_active_labels)
+		# for j in range(target_length):  # each sentence  # seq_length
+		# 	loss += criterion(decoder_output_tag[j], target_tensor[j])
+		# loss /=  float(target_length)
+		# loss_RE = criterion(RE_output_tag, relation_target_tensor)
+		loss_RE = 0
+		for i in range(len(relation_target_tensor[0])):
+			target = torch.transpose(relation_target_tensor, 0, 1)[i]
+			loss_RE += criterion(RE_output_tag, target)
+		loss_RE /= len(relation_target_tensor[0])
+		loss = 0.4*loss_entity + 0.6*loss_RE
 
 		'''
 		use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
@@ -176,14 +284,14 @@ def train(input_tensor, pos_tensor, target_tensor, encoder, decoder, encoder_opt
 				if decoder_input.item() == EOS_token:
 					break
 		'''
-		loss.backward(retain_graph=True)
 
-		encoder_optimizer.step()
-		decoder_optimizer.step()
+		loss.backward()  # retain_graph=True
 
-		return loss.item() / float(target_length), encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
+		optimizer.step()
+
+		return loss.item(), NER_active_logits, NER_active_labels, RE_output_tag, relation_target_tensor  # encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
 	else:
-		return encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
+		return NER_active_logits, NER_active_labels, RE_output_tag, relation_target_tensor  # encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
 
 
 def trainEpoches(encoder, decoder, criterion, print_every=10, learning_rate=0.001, l2=0.0001):
