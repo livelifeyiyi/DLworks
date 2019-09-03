@@ -15,6 +15,7 @@ from torch.autograd import Variable
 # from pytorch_transformers import BertModel
 from BertModelPos import BertModel
 from general_utils import get_minibatches, padding_sequence
+import Noisy_RL
 from torch.nn.utils.rnn import pad_sequence
 import os
 # from RE import Jointly_RL
@@ -37,8 +38,10 @@ class JointModel(nn.Module):
 			self.encoder = EncoderBert(config)
 		self.decoder = DecoderRNN(config)
 		self.relation_model = RelationDecoder(config, dim, relation_count)  # Jointly_RL.RelationModel(config, dim, statedim, relation_count, noisy_count)
+		if config.use_RL:
+			self.noysy_model = Noisy_RL.NoisyModel(dim, config.noisy_tag_size)
 
-	def forward(self, input_tensor, pos_tensor, target_tensor, relation_target_tensor, BATCH, mask=None, TEST=False):  # max_length=MAX_LENGTH
+	def forward(self, input_tensor, pos_tensor, target_tensor, BATCH, mask=None, TEST=False):  # max_length=MAX_LENGTH
 		if not TEST:
 			self.train()
 		else:
@@ -73,6 +76,7 @@ class JointModel(nn.Module):
 				RE_output_tag = relation_decoder(encoder_outputs, decoder_hidden, decoder_output)  # relation
 			else:
 				RE_output_tag = relation_decoder(encoder_outputs, decoder_hidden, None)
+			pooled_output = torch.mean(encoder_outputs, 1).squeeze()
 		elif self.encoder_model == 'BERT':
 			if self.config.use_pw:
 				top_vec, pooled_output = encoder(input_tensor, mask, pos_tensor)
@@ -97,7 +101,7 @@ class JointModel(nn.Module):
 			NER_active_logits = decoder_output_tag.view(-1, decoder.tag_size)
 			NER_active_labels = target_tensor.view(-1)
 
-		return NER_active_logits, NER_active_labels, RE_output_tag, relation_target_tensor, decoder_output_tag  # encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
+		return NER_active_logits, NER_active_labels, RE_output_tag, decoder_output_tag, decoder_output, pooled_output  # encoder_outputs, decoder_output, decoder_output_tag, decoder_hidden
 
 
 class EncoderRNN(nn.Module):
@@ -203,12 +207,15 @@ class RelationDecoder(nn.Module):
 		# self.hid2state = nn.Linear(dim * 2 + dim, dim)  # statedim
 		self.state2prob_relation = nn.Linear(dim, self.tag_size)  # + 1
 		self.dropout = nn.Dropout(args.dropout_RE)
+		self.dropout_lstm = nn.Dropout(args.dropout_RE)
 
 		self.att_weight = nn.Parameter(torch.randn(self.batch, 1, self.dim))  # (self.batch, 1, self.hidden_dim)
 		self.lstm = nn.LSTM(input_size=dim, hidden_size=dim, num_layers=2,batch_first=True,
 							dropout=args.dropout_RE)  # dim * 2 + dim batch_first=True,hidden_size, hidden_size)
+		self.lstm_2dim = nn.LSTM(input_size=dim * 2, hidden_size=dim, num_layers=2, batch_first=True,
+								dropout=args.dropout_RE)
 		self.relation_bias = nn.Parameter(torch.randn(self.batch, self.tag_size, 1))  # self.batch, self.tag_size, 1
-		# self.dropout_att = nn.Dropout(p=self.dropout)
+
 		self.relation_embeds = nn.Embedding(self.tag_size, self.dim)
 
 	def attention(self, H):  # input: (batch/1, hidden, seq); output: (batch/1, hidden, 1)
@@ -231,11 +238,12 @@ class RelationDecoder(nn.Module):
 			# 	decoder_output = decoder_output.cuda()  # Variable(torch.cuda.LongTensor(decoder_output, device=device)).cuda()
 				# memory = memory.cuda()  # Variable(torch.cuda.LongTensor(memory, device=device)).cuda()
 
-			seq_vec = self.dropout(encoder_output)
+			seq_vec = self.dropout_lstm(encoder_output)
 			if decoder_output is not None:
 				seq_vec = torch.cat((encoder_output.view(self.batch, -1, self.dim), decoder_output.view(self.batch, -1, self.dim)), 2)
-				seq_vec = torch.mean(seq_vec, 2)
-			lstm_out, hidden = self.lstm(seq_vec, hidden)
+				lstm_out, hidden = self.lstm_2dim(seq_vec, hidden)
+			else:
+				lstm_out, hidden = self.lstm(seq_vec, hidden)
 			# lstm_out = self.dropout(lstm_out)
 
 			sentence_vec = torch.tanh(self.attention(torch.transpose(lstm_out, 1, 2)))  # (1, dim*2, 1)

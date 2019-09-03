@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import numpy
 import numpy as np
 
 
@@ -40,11 +40,40 @@ def minibatch(data, minibatch_idx):
 	return data[minibatch_idx] if type(data) is np.ndarray else [data[i] for i in minibatch_idx]
 
 
-def padding_sequence(sequences, pad_token=0):
+def get_bags(data, relation_types, max_batchsize, shuffle=True):
+	# get bags by relation type
+	# [train_sentences_id, train_position_lambda, train_entity_tags, train_sentences_words, train_relation_tags, train_relation_names]
+	list_data = type(data) is list and (type(data[0]) is list or type(data[0]) is np.ndarray)
+	# data_size = len(data[0]) if list_data else len(data)
+	# indices = np.arange(data_size)
+	if shuffle:
+		np.random.shuffle(np.array(list(relation_types)))
+	for relation_type in relation_types:
+		bag_indices = numpy.argwhere(numpy.array(data[4]) == relation_type).reshape(-1)
+		# print(relation_type, bag_indices)
+		if shuffle:
+			np.random.shuffle(bag_indices)
+		if len(bag_indices) >= max_batchsize:
+			for minibatch_start in np.arange(0, len(bag_indices), max_batchsize):
+				minibatch_indices = bag_indices[minibatch_start:minibatch_start + max_batchsize]
+				if len(minibatch_indices) < max_batchsize:
+					continue
+				yield [minibatch(d, minibatch_indices) for d in data] if list_data \
+					else minibatch(data, minibatch_indices)
+		else:
+			continue
+			# minibatch_indices = bag_indices
+			# yield [minibatch(d, minibatch_indices) for d in data] if list_data \
+			# 	else minibatch(data, minibatch_indices)
+
+
+def padding_sequence(sequences, pad_token=0, pad_length=None):
 	Y_lengths = [len(sentence) for sentence in sequences]
 	# create an empty matrix with padding tokens
-
-	longest_sent = max(Y_lengths)
+	if not pad_length:
+		longest_sent = max(Y_lengths)
+	else:
+		longest_sent = pad_length
 	batch_size = len(sequences)
 	padded_Y = np.ones((batch_size, longest_sent)) * pad_token
 	# copy over the actual sequences

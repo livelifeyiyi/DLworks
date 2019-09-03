@@ -234,27 +234,30 @@ class Optimize(object):
 	def calcREFinalReward_F(self, RE_actions, labels):
 		sample_round = len(RE_actions)
 		r = 0.
-		for i in range(sample_round):
-			for label in labels:
-				if RE_actions[i] == label:  # ['type']:
-					self.acc_F += 1
-			if RE_actions[i] > 0:
-				self.cnt_F += 1
-			self.tot_F += 1
-			# a1, t1, c1 = calc_re_acc(top_action, None, gold_labels)
-			if self.cnt_F != 0:
-				r += self.calcF1(self.acc_F, self.cnt_F, self.tot_F, beta=0.9)
-			else:
-				r += -2
+		self.acc_F += (RE_actions == labels).sum().item()
+
+		# for i in range(sample_round):
+		# 	for label in labels:
+		# 		if RE_actions[i] == label:  # ['type']:
+		# 			self.acc_F += 1
+		# 	if RE_actions[i] > 0:
+		# 		self.cnt_F += 1
+		self.tot_F += len(RE_actions)
+		self.cnt_F = self.tot_F
+		# a1, t1, c1 = calc_re_acc(top_action, None, gold_labels)
+		if self.cnt_F != 0:
+			r += self.calcF1(self.acc_F, self.cnt_F, self.tot_F, beta=0.9)
+			# else:
+			# 	r += -2
 			# if self.cnt_F > self.tot_F:
 			# 	r -= 0.5 * (self.cnt_F - self.tot_F)
-		return r / sample_round
+		return r  # / sample_round
 
-	def optimize_each(self, RE_actions, top_actprobs, relation_label, train_entity_tags, entity_actions):  # entity_loss
+	def optimize_each(self, RE_actions, top_actprobs, relation_label, train_entity_tags=None, entity_actions=None):  # entity_loss
 		relation_reward = self.calcREFinalReward_F(RE_actions, relation_label)
-		entity_rewards = self.calcEntityReward(entity_actions, train_entity_tags)
-		entity_reward = np.mean(np.array(entity_rewards))
-		reward = relation_reward * 0.7 + entity_reward * 0.3  # -entity_loss
+		entity_rewards = 0 if train_entity_tags is None else self.calcEntityReward(entity_actions, train_entity_tags)
+		entity_reward = 0 if train_entity_tags is None else np.mean(np.array(entity_rewards))
+		reward = relation_reward if train_entity_tags is None else relation_reward * 0.7 + entity_reward * 0.3  # -entity_loss
 		if torch.cuda.is_available():
 			# grads = autograd.Variable(torch.cuda.FloatTensor(1, ).fill_(0), requires_grad=True)
 			top_actprobs = torch.cuda.FloatTensor(top_actprobs)
@@ -271,7 +274,7 @@ class Optimize(object):
 		to_grad = torch.sum(torch.mul(torch.log(top_actprobs), top_bias)).mul(-1)
 
 		# to_grad.backward()
-		return to_grad, relation_reward, reward
+		return to_grad, reward
 
 	def optimize(self, RE_actions, top_actprobs, relation_label, entity_loss):  # entity_label, entity_actions, entity_probs,
 		sample_round = len(RE_actions)

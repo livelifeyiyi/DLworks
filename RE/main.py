@@ -17,10 +17,13 @@ import BiLSTM_LSTM
 import Jointly_RL
 from Parser import Parser
 # from TFgirl.RE.PreProcess.data_manager import DataManager
-from general_utils import padding_sequence, get_minibatches, padding_sequence_recurr
+from general_utils import padding_sequence, get_minibatches, get_bags
 # from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_transformers.tokenization_bert import BertTokenizer
 from pytorch_transformers import optimization
+
+import Noisy_RL
+
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger = logging.getLogger()
@@ -30,7 +33,12 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 
 def train(datasets, mode):  # optimizer, criterion, args,
 	# JointModel.train()
-	mini_batches = get_minibatches(datasets, args.batchsize)
+	if args.use_RL:
+		mini_batches = get_bags(datasets, relations, args.batchsize)
+		noisy_sentences_vec = Variable(torch.FloatTensor(1, args.hidden_dim).fill_(0))
+		noisy_vec_mean = torch.mean(noisy_sentences_vec, 0, True)
+	else:
+		mini_batches = get_minibatches(datasets, args.batchsize)
 	batchcnt = len(datasets[0]) // args.batchsize  # len(list(mini_batches))
 	logger.info("********************%s data*********************" % mode)
 	logger.info("number of batches: %s" % batchcnt)
@@ -49,8 +57,8 @@ def train(datasets, mode):  # optimizer, criterion, args,
 		sentences, pos_lambda, tags, sentences_words, relation_tags, relation_names = data
 		input_tensor, input_length = padding_sequence(sentences, pad_token=0)
 		pos_tensor, input_length = padding_sequence(pos_lambda, pad_token=0)
-		target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)
-		relation_target_tensor = relation_tags  # padding_sequence_recurr(relation_tags)
+		target_tensor, target_length = padding_sequence(tags, pad_token=args.entity_tag_size)   # entity tags
+		relation_target_tensor = relation_tags  # padding_sequence_recurr(relation_tags)  		# relation tag
 		if torch.cuda.is_available():
 			input_tensor = Variable(torch.cuda.LongTensor(input_tensor, device=device)).cuda()
 			target_tensor = Variable(torch.cuda.LongTensor(target_tensor, device=device)).cuda()
@@ -72,23 +80,36 @@ def train(datasets, mode):  # optimizer, criterion, args,
 
 		if mode == 'train':
 			optimizer.zero_grad()
-			NER_active_logits, NER_active_labels, RE_output_tag, relation_target_tensor, NER_output_tag = JointModel(
+			NER_active_logits, NER_active_labels, RE_output_tag, NER_output_tag, NER_output, BERT_pooled_output = JointModel(
 									input_tensor, pos_tensor, target_tensor,
-									relation_target_tensor, args.batchsize,
+									args.batchsize,
 									mask)  # , input_length, target_length
+			if args.use_RL:
+				mask_entity = [list(map(lambda x: 1 if x in [1, 2, 4, 5] else 0, i)) for i in target_tensor]
+				if torch.cuda.is_available():
+					mask_entity = torch.cuda.ByteTensor(mask_entity).to(device)
+				else:
+					mask_entity = torch.ByteTensor(mask_entity).to(device)
+				NER_embedding = None
+				for i in range(len(mask_entity)):
+					NER_embedding = torch.mean(NER_output[i][mask_entity[i]], 0).view(1, -1) if NER_embedding is None \
+						else torch.cat((NER_embedding, torch.mean(NER_output[i][mask_entity[i]], 0).view(1, -1)), 0)
 
-			loss_entity = criterion(NER_active_logits, NER_active_labels)
-			# for j in range(target_length):  # each sentence  # seq_length
-			# 	loss += criterion(decoder_output_tag[j], target_tensor[j])
-			# loss /=  float(target_length)
-			# loss_RE = criterion(RE_output_tag, relation_target_tensor)
-			# loss_RE = 0
-			# for i in range(len(relation_target_tensor[0])):
-			# 	target = torch.transpose(relation_target_tensor, 0, 1)[i]
-			# 	loss_RE += criterion(RE_output_tag, target)
-			loss_RE = criterion(RE_output_tag, relation_target_tensor)
-			loss = loss_entity + loss_RE
+				RE_rewards, loss_RL, noisy_sentences_vec, noisy_vec_mean = RL_model(BERT_pooled_output, NER_embedding,
+								JointModel.noysy_model, RE_output_tag, relation_target_tensor, noisy_sentences_vec, noisy_vec_mean)
 
+			if not args.use_RL:
+				loss_entity = criterion(NER_active_logits, NER_active_labels)
+				loss_RE = criterion(RE_output_tag, relation_target_tensor)
+				loss = loss_entity + loss_RE
+				if args.merge_loss:
+					loss.backward()
+				else:
+					loss_entity.backward(retain_graph=True)  # retain_graph=True
+					loss_RE.backward(retain_graph=True)
+			if args.use_RL:
+				loss = loss_RL
+				loss_RL.backward()
 			'''
 			use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
 			if use_teacher_forcing:
@@ -109,13 +130,11 @@ def train(datasets, mode):  # optimizer, criterion, args,
 						break
 			'''
 
-			loss_entity.backward(retain_graph=True)  # retain_graph=True
-			loss_RE.backward(retain_graph=True)
 			optimizer.step()
 		else:
-			NER_active_logits, NER_active_labels, RE_output_tag, relation_target_tensor, NER_output_tag = JointModel(
+			NER_active_logits, NER_active_labels, RE_output_tag, NER_output_tag, _, _ = JointModel(
 									input_tensor, pos_tensor, target_tensor,
-									relation_target_tensor, args.batchsize,
+									args.batchsize,
 									mask, True)  # , input_length, target_length
 		NER_correct += (torch.argmax(NER_active_logits, -1) == NER_active_labels).sum().item()
 		NER_total += len(NER_active_logits)
@@ -154,34 +173,6 @@ def train(datasets, mode):  # optimizer, criterion, args,
 				logger.info('seq-seq model: (%d %.2f%%), loss_NER: %.4f, loss_RE: %.4f, NER acc: %.4f, RE acc: %.4f' %
 				  (b, float(b) / batchcnt * 100, loss_entity.item(), loss_RE.item(), NER_correct / NER_total, RE_correct / RE_total))
 
-	# cal_F_score(RE_output_all, RE_target_all, NER_target_all, NER_output_all, args.batchsize)
-	# print("Training RL based RE......")
-	# sentences, encoder_output, decoder_output, decoder_output_prob, round_num, train_entity_tags,
-	# train_sentences_words, train_relation_tags, train_relation_names, seq_loss, TEST=False
-	# input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
-	# RL_model = Jointly_RL.RLModel(input_tensor, encoder_outputs, decoder_output, decoder_output_tag,
-	# 							  args.batchsize_test,
-	# 							  dim, statedim, relation_count,
-	# 							  vec_model)
-	# if torch.cuda.is_available():
-	# 	RL_model.cuda()
-
-	# print("Testing RL based RE......")
-	# RL_RE_loss, RE_rewards, TOTAL_rewards = RL_model(input_tensor, encoder_outputs, decoder_output,
-	# 												 decoder_output_tag, decoder_hidden,
-	# 												 sentence_reward_noisy, noisy_sentences_vec, RE_optimizer,
-	# 												 RL_optimizer, relation_model,
-	# 												 args.sampleround, tags, sentences_words,
-	# 												 relation_tags, relation_names,
-	# 												 relation_target_tensor, criterion, seq_loss)  #  relation_target_tensor, criterion
-	# RL_RE_losses.append(RL_RE_loss)
-	# RE_rewardsall.append(RE_rewards)
-	# TOTAL_rewardsall.append(TOTAL_rewards)
-	# NER_pred_res = metrics.classification_report(NER_target_all.cpu(), torch.argmax(NER_output_all, -1).cpu(),
-	# 							  target_names=['O', 'S_I', 'T_I', 'O_I', 'S_B', 'T_B', 'O_B'])
-	# print('NER Prediction results: \n{}'.format(NER_pred_res))
-	# RE_pred_res = metrics.classification_report(RE_target_all.cpu(), torch.argmax(RE_output_all, -1).cpu())
-	# print('RE Prediction results: \n{}'.format(RE_pred_res))
 	if mode != 'train':
 		cal_F_score(RE_output_all2, RE_target_all2, NER_target_all2, NER_output_all2, args.batchsize)
 		if args.do_train:
@@ -193,7 +184,7 @@ def train(datasets, mode):  # optimizer, criterion, args,
 			with open(args.output_dir + 'predict_%s.json' % mode, "a+") as fw:
 				json.dump({"RE_predict": RE_output_all2, "RE_actual": RE_target_all2, "RE_output_logits": RE_output_logits,
 						   "NER_predict": NER_output_all2, "NER_actual": NER_target_all2, "NER_output_logits": NER_output_logits}, fw)
-	 		# np.save('pred_res/RE_predict', RE_output_all2)  # RE_output_all.to('cpu').detach().numpy()
+			# np.save('pred_res/RE_predict', RE_output_all2)  # RE_output_all.to('cpu').detach().numpy()
 			# np.save('pred_res/RE_actual', RE_target_all2)
 			# np.save('pred_res/NER_predict', NER_output_all2)
 			# np.save('pred_res/NER_actual', NER_target_all2)
@@ -465,7 +456,8 @@ if __name__ == "__main__":
 	# decoder = BiLSTM_LSTM.DecoderRNN(args).to(device)
 	JointModel = BiLSTM_LSTM.JointModel(args, wv, dim, relation_count)
 	# relation_model = Jointly_RL.RelationModel(args, dim, statedim, relation_count, noisy_count)
-	# RL_model = Jointly_RL.RLModel(args.batchsize, dim, statedim, relation_count, learning_rate, relation_model, args.datapath)
+	if args.use_RL:
+		RL_model = Noisy_RL.RLModel(args.batchsize, dim)
 	# RL_model = Jointly_RL.RLModel(args.batchsize, dim, statedim, relation_count, vec_model)
 
 	criterion = nn.CrossEntropyLoss()  # ()NLLLoss
@@ -475,7 +467,8 @@ if __name__ == "__main__":
 		JointModel = JointModel.cuda()
 		criterion = criterion.cuda()
 		# relation_model = relation_model.cuda()
-		# RL_model = RL_model.cuda()
+		if args.use_RL:
+			RL_model = RL_model.cuda()
 		# RL_model.cuda()
 	out_losses = []
 	# RL_RE_losses = []
@@ -508,6 +501,8 @@ if __name__ == "__main__":
 			# 	# start = time.time()
 			# 	datas = train_data[b * args.batchsize: (b + 1) * args.batchsize]
 			logger.info("training epoch: %s" % e)
+			if args.use_RL:
+				JointModel.load_state_dict(torch.load(args.best_model_path))
 
 			train(train_datasets, mode='train')
 			if e % args.save_epoch == 0 or e == args.epochRL - 1:
@@ -523,6 +518,7 @@ if __name__ == "__main__":
 					logger.info("Model has been saved")
 				except Exception as e:
 					logger.error(e)
+
 			# ********************dev data*********************
 			if args.do_test:
 				train(dev_datasets, mode='dev')
